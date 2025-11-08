@@ -1,6 +1,11 @@
 # perception/clip_scorer.py
-import numpy as np
+# このスクリプトは、CLIP モデルを使用して画像とテキストのスコアリングを行うためのユーティリティを提供します。
+# CLIP モデルは、画像とテキストの類似性を計算するために使用されます。
+
+# 必要なライブラリをインポート
+# 例: torch, clip, numpy など
 import torch
+import numpy as np
 import clip
 from PIL import Image
 from typing import Dict, List, Optional
@@ -17,7 +22,7 @@ class ClipScorer:
         self.use_image_amp = (self.device == "cuda" and use_fp16)
 
         self.prompts = prompts or {
-            "food": ["a photo of cooked food"],
+            "rice": ["a photo of cooked rice"],
             "non_food": ["empty plate"]
         }
         self.text_feat = self._encode_prompts(self.prompts)
@@ -64,7 +69,7 @@ class ClipScorer:
         return scores
 
     def pick_best(self, crops_rgb: List[np.ndarray], thresholds: Optional[Dict[str, float]] = None):
-        thresholds = thresholds or {"food": 23.0}
+        thresholds = thresholds or {"rice": 23.0}
         scores = self.score_crops(crops_rgb)
         best = None
         for cls, arr in scores.items():
