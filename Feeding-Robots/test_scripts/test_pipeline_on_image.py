@@ -3,7 +3,7 @@ import sys
 import cv2
 
 # プロジェクトのルートディレクトリを Python パスに追加
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", )))
 
 from src.pipeline import PerceptionPipeline
 from src.utils.misc import draw_mask_on_image
