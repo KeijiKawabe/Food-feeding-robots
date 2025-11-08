@@ -30,7 +30,7 @@ class PerceptionPipeline:
             masks = filter_masks_by_area(self.sam.generate_masks(rgb), H, W,
                                          self.min_area, self.max_area_frac)
             crops, bboxes = masks_to_crops_and_bboxes(rgb, masks)
-            pick = self.clip.pick_best(crops, thresholds={"food":23.0})
+            pick = self.clip.pick_best(crops, thresholds={"rice": 23.0}) if crops else None
             if pick:
                 bbox = bboxes[pick["index"]]
                 refined = self.sam.predict_by_bbox(bbox)

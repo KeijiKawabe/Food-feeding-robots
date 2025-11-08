@@ -17,7 +17,7 @@ class ClipScorer:
         self.use_image_amp = (self.device == "cuda" and use_fp16)
 
         self.prompts = prompts or {
-            "food": ["a photo of cooked food"],
+            "rice": ["a photo of rice"],
             "non_food": ["empty plate"]
         }
         self.text_feat = self._encode_prompts(self.prompts)
@@ -64,7 +64,7 @@ class ClipScorer:
         return scores
 
     def pick_best(self, crops_rgb: List[np.ndarray], thresholds: Optional[Dict[str, float]] = None):
-        thresholds = thresholds or {"food": 23.0}
+        thresholds = thresholds or {"rice": 23.0}
         scores = self.score_crops(crops_rgb)
         best = None
         for cls, arr in scores.items():
