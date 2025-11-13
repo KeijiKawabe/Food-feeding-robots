@@ -14,7 +14,8 @@ def main():
     ap.add_argument("--min_area", type=int, default=1000)
     ap.add_argument("--max_area_frac", type=float, default=0.5)
     ap.add_argument("--clip_model", default="ViT-B/32")
-    ap.add_argument("--openai_api_key", default=os.getenv("OPENAI_API_KEY"))
+    ap.add_argument("--openai_api_key", default=None,
+                    help="OpenAI API key (overrides OPENAI_API_KEY env var)")
     ap.add_argument("--asr_model", default="gpt-4o-transcribe")
     ap.add_argument("--llm_model", default="gpt-4o-mini")
     ap.add_argument("--voice_path", default="")
@@ -27,7 +28,9 @@ def main():
         max_area_frac=args.max_area_frac, clip_model=args.clip_model
     )
 
-    client = OpenAI(api_key=args.openai_api_key) if args.openai_api_key else None
+    # 管理用の変数として API キーを取得（CLI 引数があればそれを優先し、なければ環境変数を使う）
+    api_key = args.openai_api_key or os.getenv("OPENAI_API_KEY")
+    client = OpenAI(api_key=api_key) if api_key else None
     cap = cv2.VideoCapture(args.cam)
     if not cap.isOpened(): raise SystemExit("Camera open failed")
 
