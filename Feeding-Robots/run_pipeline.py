@@ -12,18 +12,19 @@ from Feeding_Robots.src.utils.misc import draw_mask_on_image
 def main():
     # コマンドライン引数を解析
     ap = argparse.ArgumentParser()
-    ap.add_argument("--sam2_cfg", required=True, help="SAM2 の設定ファイルへのパス")
-    ap.add_argument("--sam2_ckpt", required=True, help="SAM2 のチェックポイントファイルへのパス")
-    ap.add_argument("--device", default="cuda", help="パイプラインを実行するデバイス (例: 'cuda' または 'cpu')")
-    ap.add_argument("--interval", type=int, default=10, help="マスク生成のフレーム間隔")
-    ap.add_argument("--min_area", type=int, default=1000, help="検出されたマスクの最小面積")
-    ap.add_argument("--max_area_frac", type=float, default=0.5, help="マスクの最大面積の割合")
-    ap.add_argument("--clip_model", default="ViT-B/32", help="認識に使用する CLIP モデル")
-    ap.add_argument("--openai_api_key", default=os.getenv("OPENAI_API_KEY"), help="OpenAI API キー")
-    ap.add_argument("--asr_model", default="gpt-4o-transcribe", help="音声文字起こし用の ASR モデル")
-    ap.add_argument("--llm_model", default="gpt-4o-mini", help="プロンプト生成用の LLM モデル")
-    ap.add_argument("--voice_path", default="", help="文字起こし用の音声ファイルのパス")
-    ap.add_argument("--cam", type=int, default=0, help="ビデオキャプチャ用のカメラインデックス")
+    ap.add_argument("--sam2_cfg", required=True)
+    ap.add_argument("--sam2_ckpt", required=True)
+    ap.add_argument("--device", default="cuda")
+    ap.add_argument("--interval", type=int, default=10)
+    ap.add_argument("--min_area", type=int, default=1000)
+    ap.add_argument("--max_area_frac", type=float, default=0.5)
+    ap.add_argument("--clip_model", default="ViT-B/32")
+    ap.add_argument("--openai_api_key", default=None,
+                    help="OpenAI API key (overrides OPENAI_API_KEY env var)")
+    ap.add_argument("--asr_model", default="gpt-4o-transcribe")
+    ap.add_argument("--llm_model", default="gpt-4o-mini")
+    ap.add_argument("--voice_path", default="")
+    ap.add_argument("--cam", type=int, default=0)
     args = ap.parse_args()
 
     # PerceptionPipeline を初期化
@@ -33,8 +34,11 @@ def main():
         max_area_frac=args.max_area_frac, clip_model=args.clip_model
     )
 
-    # OpenAI クライアントを初期化 (API キーが提供されている場合)
-    client = OpenAI(api_key=args.openai_api_key) if args.openai_api_key else None
+  # 管理用の変数として API キーを取得（CLI 引数があればそれを優先し、なければ環境変数を使う）
+    api_key = args.openai_api_key or os.getenv("OPENAI_API_KEY")
+    client = OpenAI(api_key=api_key) if api_key else None
+    cap = cv2.VideoCapture(args.cam)
+    if not cap.isOpened(): raise SystemExit("Camera open failed")
 
     # カメラフィードを開く
     cap = cv2.VideoCapture(args.cam)
