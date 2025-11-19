@@ -56,7 +56,7 @@ class ClipScorer:
 
         # ✨ 画像側だけ AMP を使う（あくまで入力と一部演算のみ FP16 に）
         if self.use_image_amp:
-            with torch.cuda.amp.autocast(dtype=torch.float16):
+            with torch.amp.autocast('cuda', dtype=torch.float16):
                 img_feat = self.model.encode_image(batch)
         else:
             img_feat = self.model.encode_image(batch)

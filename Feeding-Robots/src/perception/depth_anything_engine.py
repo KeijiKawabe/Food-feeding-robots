@@ -19,7 +19,7 @@ from depth_anything_v2.dpt import DepthAnythingV2
 class DepthAnythingEngine:
     def __init__(self,
                  encoder="vitl",
-                 ckpt_path="metric_depth/checkpoints/depth_anything_v2_metric_hypersim_vitl.pth",
+                 ckpt_path="metric_depth/checkpoints/depth_anything_v2_metric_hypersim_vitb.pth",
                  device="cuda",
                  max_depth=20.0):
 
@@ -48,16 +48,23 @@ class DepthAnythingEngine:
         print("✓ DepthAnythingV2 loaded.")
 
     @torch.no_grad()
-    def infer_depth(self, bgr_img):
-        img_rgb = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2RGB)
-        img = torch.from_numpy(img_rgb).float().permute(2, 0, 1) / 255.0
-        img = img.unsqueeze(0).to(self.device)
+    def infer_depth(self, bgr_img: np.ndarray) -> np.ndarray:
+        """
+        bgr_img: OpenCV の BGR 画像 (H, W, 3)
+        戻り値: depth マップ (H, W), float32
+        """
+        # ★ run.py と同じく infer_image を使う
+        #   run.py では raw_image = cv2.imread(...); depth_anything.infer_image(raw_image, input_size)
+        self.input_size = 518  # run.py のデフォルト値に合わせる
+        depth = self.model.infer_image(bgr_img, self.input_size)  # (H, W) の numpy 配列のはず
+        depth = depth.astype(np.float32)
 
-        pred = self.model.infer(img)[0]
-        depth = pred.cpu().numpy().astype(np.float32)
+        # max_depth を設定している場合のみクリップ
+        if self.max_depth is not None:
+            depth = np.clip(depth, 0, self.max_depth)
 
-        return np.clip(depth, 0, self.max_depth)
-
+        return depth
+        
     def depth_of_mask(self, depth_map, mask):
         ys, xs = np.where(mask > 0)
         if len(xs) == 0:
