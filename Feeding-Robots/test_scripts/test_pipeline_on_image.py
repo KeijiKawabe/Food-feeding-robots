@@ -3,77 +3,142 @@
 import os
 import sys
 import cv2
+import numpy as np
 
-# make `src` importable so `src.pipeline` and `src.thermal` resolve
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
+# プロジェクトの src を import できるようにパス追加
+ROOT = os.path.dirname(__file__)
+PROJECT_ROOT = os.path.abspath(os.path.join(ROOT, ".."))
+sys.path.append(PROJECT_ROOT)
 
 from src.pipeline import PerceptionPipeline
+from src.utils.misc import draw_mask_on_image
 
 
 def main():
-    print("\n=== Testing Perception Pipeline with Depth ===")
+    # --- テスト用画像パス ---
+    # 例: feeding-robots/data/test_image.jpg
+    IMG = os.path.join(ROOT, "..", "data", "test_image.jpg")
 
-    SAM2_CFG = "../../sam2/sam2/configs/sam2.1/sam2.1_hiera_b+.yaml"
-    SAM2_CKPT = "../../sam2/checkpoints/sam2.1_hiera_base_plus.pt"
-
-    DEPTH_CKPT = "../Depth-Anything-v2/metric_depth/checkpoints/depth_anything_v2_metric_hypersim_vitb.pth"
-
-    # Get OpenAI API key from environment if available (used by thermal GPT analysis)
-    api_key = os.getenv("OPENAI_API_KEY")
-
-    pipe = PerceptionPipeline(
-        sam2_cfg=SAM2_CFG,
-        sam2_ckpt=SAM2_CKPT,
-        enable_depth=True,
-        depth_ckpt=DEPTH_CKPT,
-        device="cuda",
-        enable_thermal=True,
-        thermal_api_key=api_key,
-        thermal_save_image=False
+    # --- SAM2 の設定ファイル/重みのパス ---
+    CFG = os.path.join(
+        ROOT,
+        "..",
+        "..",
+        "sam2",
+        "sam2",
+        "configs",
+        "sam2.1",
+        "sam2.1_hiera_b+.yaml",
+    )
+    CKPT = os.path.join(
+        ROOT,
+        "..",
+        "..",
+        "sam2",
+        "checkpoints",
+        "sam2.1_hiera_base_plus.pt",
     )
 
-    img_path = "test_image.jpg"
-    img = cv2.imread(img_path)
-
-    if img is None:
-        print(f"❌ cannot load image: {img_path}")
+    # パス確認
+    if not os.path.exists(IMG):
+        print("❌ テスト画像が見つかりません:", IMG)
+        print("   例として feeding-robots/data/test_image.jpg を置いてください。")
+        return
+    if not os.path.exists(CFG):
+        print("❌ SAM2 config が見つかりません:", CFG)
+        return
+    if not os.path.exists(CKPT):
+        print("❌ SAM2 checkpoint が見つかりません:", CKPT)
         return
 
-    out = pipe.process_frame(img)
+    # --- PerceptionPipeline の初期化 ---
+    pipe = PerceptionPipeline(
+        sam2_cfg=CFG,
+        sam2_ckpt=CKPT,
+        device="cuda",          # GPU なしなら "cpu" でもOK（少し遅くなる）
+        maskgen_interval=1,     # 静止画1枚なので 1 でOK
+        min_area=1000,
+        max_area_frac=0.5,
+        clip_model="ViT-B/32",
+        clip_prompts=None,      # ClipScorer 側のデフォルト or 後で update_clip_prompts() で上書き
+        enable_depth=False,     # 画像テストなので depth は使わない
+    )
 
+    print("\n=== Testing PerceptionPipeline on Single Image ===")
+    print("Image:", IMG)
+
+    # --- 画像読み込み ---
+    bgr = cv2.imread(IMG)
+    if bgr is None:
+        print("❌ 画像を読み込めませんでした:", IMG)
+        return
+
+    # --- パイプライン実行（depth_frame は None） ---
+    out = pipe.process_frame(bgr, depth_frame=None)
+
+    mask = out["mask"]
+    bbox = out["bbox"]
+    label = out["label"]
+    score = out["score"]
+    center_px = out["center_px"]
+    depth_m = out["depth_m"]   # enable_depth=False なので None のはず
+    fps = out["fps"]
+
+    # コンソール出力
     print("\n=== Pipeline Output ===")
-    for k, v in out.items():
-        print(f"{k}: {v}")
+    print("label    :", label)
+    print("score    :", score)
+    print("bbox     :", bbox)
+    print("center_px:", center_px)
+    print("depth_m  :", depth_m)
+    print("fps(EMA) :", fps)
 
-    # 可視化
-    if out["bbox"] is not None:
-        x1, y1, x2, y2 = out["bbox"]
-        vis = img.copy()
+    # --- 可視化 ---
+    vis = bgr.copy()
+
+    # マスクをオーバーレイ
+    if mask is not None:
+        vis = draw_mask_on_image(vis, mask)
+
+    # BBox を描画
+    if bbox is not None:
+        x1, y1, x2, y2 = bbox
         cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cv2.imshow("Depth-Aware Pipeline", vis)
-        cv2.waitKey(5000)
-        cv2.destroyAllWindows()
 
-    # --- Thermal test (one-shot) ---
-    print("\n=== Thermal test (one-shot) ===")
-    if getattr(pipe, 'thermal', None) is None:
-        print("Thermal system not initialized or not available")
-        return
+    # 中心ピクセルの表示
+    if center_px is not None:
+        cx, cy = center_px
+        cv2.circle(vis, (cx, cy), 4, (0, 0, 255), -1)
 
-    # Run the pipeline's thermal analysis routine (captures and runs GPT analysis)
-    therm_res = pipe.run_thermal_analysis()
-    print("Thermal result:", therm_res)
+    # テキスト情報
+    text_lines = []
+    if label is not None:
+        text_lines.append(f"Label: {label}")
+    if score is not None:
+        text_lines.append(f"CLIP score: {score:.2f}")
+    if fps is not None:
+        text_lines.append(f"FPS(EMA): {fps:.1f}")
 
-    # Also capture and display the palette image if available
-    try:
-        tdata, timg = pipe.thermal.capture_thermal_image()
-        if timg is not None:
-            cv2.imshow('Thermal Palette', timg)
-            cv2.waitKey(5000)
-            cv2.destroyAllWindows()
-    except Exception as e:
-        print(f"Failed to capture/display thermal image: {e}")
+    y0 = 20
+    for i, txt in enumerate(text_lines):
+        y = y0 + i * 18
+        cv2.putText(
+            vis,
+            txt,
+            (10, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+
+    # ウィンドウ表示
+    cv2.imshow("PerceptionPipeline - Single Image", vis)
+    print("\nウィンドウに結果を表示しました。何かキーを押すと終了します。")
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+    print("OK: pipeline single-image test finished.")
 
 
 if __name__ == "__main__":
