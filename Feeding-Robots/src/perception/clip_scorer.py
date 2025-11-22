@@ -74,3 +74,19 @@ class ClipScorer:
                 if best is None or s > best["score"]:
                     best = {"cls": cls, "index": j, "score": s}
         return best
+    def pick_target(self, crops, target_label):
+        if target_label is None:
+            return None
+        # 指定ラベルに対してスコアを計算する
+        # score_crops は {label: np.array([...])} を返す
+        scores_dict = self.score_crops(crops)
+
+        if target_label not in scores_dict:
+            return None
+
+        scores = scores_dict[target_label]
+        if scores.size == 0:
+            return None
+
+        idx = int(np.argmax(scores))
+        return {"index": idx, "cls": target_label, "score": float(scores[idx])}
