@@ -126,6 +126,7 @@ class PerceptionPipeline:
         self,
         frame_bgr: np.ndarray,
         depth_frame: Optional[np.ndarray] = None,
+        target_label: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         1フレーム分の RGB (+ 任意で Depth) を入力として処理し、
@@ -173,10 +174,12 @@ class PerceptionPipeline:
             crops, bboxes = masks_to_crops_and_bboxes(rgb, masks)
 
             if crops:
-                # --- CLIP で最もそれっぽい食材マスクを1つ選ぶ ---
-                # 閾値は ClipScorer 側の実装に任せる or 必要ならここで dict を渡す
-                pick = self.clip.pick_best(crops, thresholds=None)
-
+                if target_label is None:
+                    # 従来の方式：CLIPスコア最大採用
+                    pick = self.clip.pick_best(crops)
+                else:
+                    # ★ 新方式：LLM の next_food でフィルタした中で最大スコア
+                    pick = self.clip.pick_target(crops, target_label)
                 if pick is not None:
                     idx = pick["index"]
                     cls = pick["cls"]
