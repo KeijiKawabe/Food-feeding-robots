@@ -163,6 +163,56 @@ RGB は使用しません。
         decision["area_temps"] = area_temps
 
         return decision
+    
+    def run_test(self, target_temp=65, save_image=True):
+        """
+        Thermal camera test + GPT safety check.
+        Returns True if safe, False if unsafe.
+        """
+
+        # ---- 1. Thermal capture ----
+        palette, raw = self.camera.capture_frame()
+
+        if raw is None:
+            print("✗ Thermalカメラから画像を取得できませんでした")
+            return False
+
+        # 温度変換
+        temperature = raw.astype("float32") * 0.1 - 100.0
+        temp_max = float(temperature.max())
+
+        print(f"取得温度: max={temp_max:.2f}℃")
+
+        # ---- 2. Save image ----
+        if save_image:
+            self.save_debug_image(palette, temperature)
+
+        # ---- 3. GPT safety check ----
+        result = self.ask_gpt_temperature_judgement(temp_max, target_temp)
+
+        print("GPT 判定:", result)
+
+        return ("OK" in result)
+    
+    def ask_gpt_temperature_judgement(self, temp, target):
+        prompt = f"""
+食品の最大温度は {temp:.1f}℃ です。
+安全に食べられる温度（上限）は {target}℃ とします。
+
+この食べ物は安全に食べられますか？
+回答は「OK」または「NG」のみ返してください。
+"""
+
+        response = self.client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "system", "content": "You are a strict food safety checker."},
+                      {"role": "user", "content": prompt}]
+        )
+
+        return response.choices[0].message.content.strip()
+
+
+
 
     # -----------------------------
     # Cleanup
