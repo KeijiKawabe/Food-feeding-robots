@@ -1,0 +1,66 @@
+DEBUG [IRLogger.cpp:105] @ 0.0004063s :***************************************************
+DEBUG [IRLogger.cpp:106] @ 0.0004933s :* IRImagerDirect SDK                              *
+DEBUG [IRLogger.cpp:107] @ 0.0005152s :***************************************************
+DEBUG [IRLogger.cpp:113] @ 0.0005311s :* Native Machine:      AMD64
+DEBUG [IRLogger.cpp:114] @ 0.000546s :* Machine:             AMD64
+DEBUG [IRLogger.cpp:116] @ 0.0005682s :* OS:                  Windows 10 0 26100
+DEBUG [IRLogger.cpp:123] @ 0.0005813s :***************************************************
+DEBUG [IRDeviceParams.cpp:204] @ 0.0010597s :Parameters
+DEBUG [IRDeviceParams.cpp:205] @ 0.0010782s :serial: 0
+DEBUG [IRDeviceParams.cpp:206] @ 0.0010872s :videoformatindex: 0
+DEBUG [IRDeviceParams.cpp:207] @ 0.0010955s :fov: 0
+DEBUG [IRDeviceParams.cpp:208] @ 0.0011042s :optics_text: 0000000000000000
+DEBUG [IRDeviceParams.cpp:209] @ 0.0011126s :formatspath: 00000213A9106E60
+DEBUG [IRDeviceParams.cpp:210] @ 0.0011225s :calipath: 0000000000000000
+DEBUG [IRDeviceParams.cpp:211] @ 0.0011303s :temperature min: 0
+DEBUG [IRDeviceParams.cpp:212] @ 0.0011383s :temperature max: 0
+DEBUG [IRDeviceParams.cpp:213] @ 0.001148s :framerate: 32
+DEBUG [IRDeviceParams.cpp:214] @ 0.0011562s :bispectral: 0
+DEBUG [IRDeviceParams.cpp:215] @ 0.0011642s :flag automatic: 1
+DEBUG [IRDeviceParams.cpp:216] @ 0.0011729s :min interval: 15
+DEBUG [IRDeviceParams.cpp:217] @ 0.0011812s :max interval: 0
+DEBUG [IRDeviceParams.cpp:218] @ 0.0011964s :chip heating mode: 0
+DEBUG [IRDeviceParams.cpp:219] @ 0.0012052s :chip heating fixed val: 40
+DEBUG [IRDeviceParams.cpp:220] @ 0.001214s :focus:  -1
+DEBUG [IRDeviceParams.cpp:221] @ 0.001371s :enable extended temp range: 0
+DEBUG [IRDeviceParams.cpp:222] @ 0.0015573s :buffer queue size: 5
+DEBUG [IRDeviceParams.cpp:223] @ 0.0015797s :enable high precision: 0
+DEBUG [IRDeviceParams.cpp:224] @ 0.0015888s :radialDistortionCorrectionMode: 0
+DEBUG [IRDeviceParams.cpp:225] @ 0.001597s :deviceAPI: 0
+DEBUG [IRDeviceParams.cpp:226] @ 0.0016055s :useExternalProbeForReferencing: 0
+DEBUG [IRDeviceParams.cpp:227] @ 0.0016149s :enableMultiThreading: 0
+DEBUG [IRDeviceParams.cpp:232] @ 0.0016287s :ethernetDevice.deviceIpAddress: 0.0.0.0
+DEBUG [IRDeviceParams.cpp:233] @ 0.0016379s :ethernetDevice.localUdpPort: 0
+DEBUG [IRDeviceParams.cpp:234] @ 0.0016466s :ethernetDevice.checkUdpSenderIp: 1
+DEBUG [Cali.cpp:87] @ 0.784329s :Calibration directory path: C:\Users\sugim\AppData\Roaming\Imager\Cali
+DEBUG [Cali.cpp:88] @ 0.78447s :Calibration file name: Cali-14110095.xml
+DEBUG [SimpleXML.cpp:238] @ 0.784857s :Failed to open file C:\Users\sugim\AppData\Roaming\Imager\Cali\Cali-14110095.xml
+DEBUG [Cali.cpp:87] @ 0.784934s :Calibration directory path: C:\Users\sugim\AppData\Roaming\Imager\Cali
+DEBUG [Cali.cpp:88] @ 0.784981s :Calibration file name: Cali-14110095.xml
+DEBUG [SimpleXML.cpp:238] @ 0.785261s :Failed to open file C:\Users\sugim\AppData\Roaming\Imager\Cali\Cali-14110095.xml
+DEBUG [Cali.cpp:87] @ 0.785328s :Calibration directory path: C:\Users\sugim\AppData\Roaming\Imager\Cali
+DEBUG [Cali.cpp:88] @ 0.785372s :Calibration file name: Cali-14110095.xml
+DEBUG [SimpleXML.cpp:238] @ 0.785686s :Failed to open file C:\Users\sugim\AppData\Roaming\Imager\Cali\Cali-14110095.xml
+DEBUG [Cali.cpp:87] @ 0.785748s :Calibration directory path: C:\Users\sugim\AppData\Roaming\Imager\Cali
+DEBUG [Cali.cpp:88] @ 0.785794s :Calibration file name: Cali-14110095.xml
+DEBUG [SimpleXML.cpp:238] @ 0.786061s :Failed to open file C:\Users\sugim\AppData\Roaming\Imager\Cali\Cali-14110095.xml
+DEBUG [Cali.cpp:87] @ 0.906082s :Calibration directory path: C:\Users\sugim\AppData\Roaming\Imager\Cali
+DEBUG [Cali.cpp:88] @ 0.906161s :Calibration file name: Cali-14110095.xml
+DEBUG [SimpleXML.cpp:238] @ 0.90659s :Failed to open file C:\Users\sugim\AppData\Roaming\Imager\Cali\Cali-14110095.xml
+DEBUG [Cali.cpp:87] @ 0.906732s :Calibration directory path: C:\Users\sugim\AppData\Roaming\Imager\Cali
+DEBUG [Cali.cpp:88] @ 0.906817s :Calibration file name: Cali-14110095.xml
+DEBUG [SimpleXML.cpp:238] @ 0.907588s :Failed to open file C:\Users\sugim\AppData\Roaming\Imager\Cali\Cali-14110095.xml
+DEBUG [Cali.cpp:87] @ 0.935684s :Calibration directory path: C:\Users\sugim\AppData\Roaming\Imager\Cali
+DEBUG [Cali.cpp:88] @ 0.935711s :Calibration file name: Cali-14110095.xml
+DEBUG [SimpleXML.cpp:238] @ 0.935829s :Failed to open file C:\Users\sugim\AppData\Roaming\Imager\Cali\Cali-14110095.xml
+DEBUG [Cali.cpp:87] @ 0.935846s :Calibration directory path: C:\Users\sugim\AppData\Roaming\Imager\Cali
+DEBUG [Cali.cpp:88] @ 0.935856s :Calibration file name: Cali-14110095.xml
+DEBUG [SimpleXML.cpp:238] @ 0.935914s :Failed to open file C:\Users\sugim\AppData\Roaming\Imager\Cali\Cali-14110095.xml
+INFO [IRImager.cpp:266] @ 0.950467s :Init thermal imager to 14110095 with size: 160x121@120 Hz
+DEBUG [Cali.cpp:87] @ 0.952259s :Calibration directory path: C:\Users\sugim\AppData\Roaming\Imager\Cali
+DEBUG [Cali.cpp:88] @ 0.952326s :Calibration file name: Cali-14110095.xml
+DEBUG [SimpleXML.cpp:238] @ 0.952588s :Failed to open file C:\Users\sugim\AppData\Roaming\Imager\Cali\Cali-14110095.xml
+DEBUG [Cali.cpp:87] @ 0.952634s :Calibration directory path: C:\Users\sugim\AppData\Roaming\Imager\Cali
+DEBUG [Cali.cpp:88] @ 0.952668s :Calibration file name: Cali-14110095.xml
+DEBUG [SimpleXML.cpp:238] @ 0.952883s :Failed to open file C:\Users\sugim\AppData\Roaming\Imager\Cali\Cali-14110095.xml
+ERROR [IRImager.cpp:278] @ 0.952929s :Missing calibration files Cali-14110095.xml;
