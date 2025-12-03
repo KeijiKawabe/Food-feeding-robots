@@ -5,13 +5,11 @@ from xarm.wrapper import XArmAPI
 import time
 
 # ============================================
-# 0. Charuco ボードの設定（印刷したものと一致させる）
+# 0. ArUco マーカー設定（Charuco は使わない）
 # ============================================
-CHARUCO_SQUARES_X = 5
-CHARUCO_SQUARES_Y = 7
-SQUARE_LENGTH_M   = 0.030  # 30mm
-MARKER_LENGTH_M   = 0.024  # 24mm
-ARUCO_DICT_NAME   = cv2.aruco.DICT_4X4_50
+
+ARUCO_DICT = cv2.aruco.DICT_6X6_250   # 印刷したマーカーと合わせる
+MARKER_LENGTH_M = 0.035              # マーカーの一辺サイズ[m] 例：3.5cm
 
 
 # ============================================
@@ -40,6 +38,7 @@ def init_xarm(ip="192.168.1.199"):
 
 
 def get_robot_pose(arm):
+    """xArm の TCP pose を2回読んで平均を取る"""
     p1 = np.array(arm.get_position(is_radian=True)[1])
     time.sleep(0.05)
     p2 = np.array(arm.get_position(is_radian=True)[1])
@@ -51,15 +50,17 @@ def get_robot_pose(arm):
 # ============================================
 
 def pose_to_matrix_base2gripper(p):
+    """xArm pose → base→gripper の4x4行列"""
     x, y, z, rx, ry, rz = p
     R, _ = cv2.Rodrigues(np.array([rx, ry, rz], float))
     T = np.eye(4)
     T[:3, :3] = R
-    T[:3, 3] = np.array([x, y, z]) / 1000.0  # mm→m
+    T[:3, 3] = np.array([x, y, z]) / 1000.0
     return T
 
 
 def rt_to_matrix(rvec, tvec):
+    """Rodrigues rvec,tvec → 4x4行列"""
     R, _ = cv2.Rodrigues(rvec)
     T = np.eye(4)
     T[:3, :3] = R
@@ -68,44 +69,28 @@ def rt_to_matrix(rvec, tvec):
 
 
 # ============================================
-# 4. Charuco Pose Estimation: board → camera
+# 4. ArUco Pose Estimation（marker → camera）
 # ============================================
 
-def create_charuco_board():
-    aruco_dict = cv2.aruco.getPredefinedDictionary(ARUCO_DICT_NAME)
-    board = cv2.aruco.CharucoBoard_create(
-        CHARUCO_SQUARES_X,
-        CHARUCO_SQUARES_Y,
-        SQUARE_LENGTH_M,
-        MARKER_LENGTH_M,
-        aruco_dict
-    )
-    return aruco_dict, board
+def create_aruco():
+    aruco_dict = cv2.aruco.getPredefinedDictionary(ARUCO_DICT)
+    parameters = cv2.aruco.DetectorParameters()
+    return aruco_dict, parameters
 
 
-def get_charuco_pose(frame, aruco_dict, board, camera_matrix, dist_coeffs):
+def get_aruco_pose(frame, aruco_dict, parameters, camera_matrix, dist_coeffs):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    # detect ArUco markers
-    corners, ids, _ = cv2.aruco.detectMarkers(gray, aruco_dict)
+    corners, ids, _ = cv2.aruco.detectMarkers(gray, aruco_dict, parameters=parameters)
     if ids is None or len(ids) == 0:
         return None, None
 
-    # interpolate charuco corners
-    retval, charuco_corners, charuco_ids = cv2.aruco.interpolateCornersCharuco(
-        corners, ids, gray, board
+    rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
+        corners, MARKER_LENGTH_M, camera_matrix, dist_coeffs
     )
-    if charuco_ids is None or len(charuco_ids) < 4:
-        return None, None
 
-    # estimate board pose
-    retval, rvec, tvec = cv2.aruco.estimatePoseCharucoBoard(
-        charuco_corners, charuco_ids, board, camera_matrix, dist_coeffs, None, None
-    )
-    if not retval:
-        return None, None
-
-    return rvec, tvec
+    # 最初のマーカーだけ使用
+    return rvecs[0], tvecs[0]
 
 
 # ============================================
@@ -113,16 +98,12 @@ def get_charuco_pose(frame, aruco_dict, board, camera_matrix, dist_coeffs):
 # ============================================
 
 def handeye_eye_to_hand():
-    # RealSense 起動
     pipeline = init_realsense()
-
-    # xArm 起動
     arm = init_xarm()
 
-    # Charuco ボード
-    aruco_dict, board = create_charuco_board()
+    aruco_dict, parameters = create_aruco()
 
-    # === カメラ内部パラメータ ===
+    # ===== RealSense 内部パラメータ（事前キャリブ値を入れる）=====
     fx = 389.846
     fy = 389.846
     cx = 321.177
@@ -138,64 +119,61 @@ def handeye_eye_to_hand():
     # Hand–Eye データ
     R_gripper2base = []
     t_gripper2base = []
-    R_target2cam   = []
-    t_target2cam   = []
+    R_target2cam = []
+    t_target2cam = []
 
-    # xArm の姿勢（任意に増やしてOK）
+    # ★ あなたが指定した pose_list をそのまま使用 ★
     pose_list = [
-        [300,   0, 250,  0, 0, 0],
-        [300,  40, 260,  0, 0, 20],
-        [300, -40, 260,  0, 0, -20],
-        [260,   0, 250,  0, 20, 0],
-        [340,   0, 250,  0, -20, 0],
-        [300,   0, 280, 20, 0, 0],
-        [300,   0, 220, -20,0, 0],
+        [390.1, 27.7, 211.4, -91.7, 4.7, -92.2],
+        [390.1, 200, 211.4,  -50, 0, -70],
+        [390.1, 200, 190,  -30, -10, -50],
+        [420, 200, 190,  0, 5, -30],
+        [420, 0, 190,  20, -20, -40],
+        [280, 0, 240, -30 -40, 0, -60],  # -30-40 は -70 として評価される
+        [390.1, 27.7, 211.4, -91.7, 4.7, -92.2],
     ]
 
-    print("=== Start Eye-to-Hand Charuco Calibration ===")
+    print("=== Start Eye-to-Hand Calibration (Aruco) ===")
 
     for i, pose in enumerate(pose_list):
-        x,y,z, rx_deg,ry_deg,rz_deg = pose
+        x, y, z, rx_deg, ry_deg, rz_deg = pose
 
-        # xArm を動かす
         arm.set_position(x, y, z, rx_deg, ry_deg, rz_deg,
                          speed=20, mvacc=2000, wait=True)
         time.sleep(0.8)
 
-        # ---------------------------
-        # ① Robot: base → gripper
-        # ---------------------------
+        # ① base→gripper
         p = get_robot_pose(arm)
         T_bg = pose_to_matrix_base2gripper(p)
-        T_gb = np.linalg.inv(T_bg)  # gripper → base
+        T_gb = np.linalg.inv(T_bg)  # gripper→base
 
-        # ---------------------------
-        # ② Camera: board → camera
-        # ---------------------------
+        # ② marker→camera
         frames = pipeline.wait_for_frames()
-        color_frame = frames.get_color_frame()
-        if not color_frame:
+        frame = frames.get_color_frame()
+        if not frame:
+            print(f"[{i}] No color frame. Skip.")
             continue
-        color_image = np.asanyarray(color_frame.get_data())
 
-        rvec, tvec = get_charuco_pose(color_image, aruco_dict, board, camera_matrix, dist_coeffs)
+        img = np.asanyarray(frame.get_data())
+        rvec, tvec = get_aruco_pose(img, aruco_dict, parameters, camera_matrix, dist_coeffs)
         if rvec is None:
-            print(f"[{i}] Charuco not found. Skip.")
+            print(f"[{i}] ArUco not detected. Skip.")
             continue
 
-        T_tc = rt_to_matrix(rvec, tvec)  # board→cam
+        T_tc = rt_to_matrix(rvec, tvec)
 
-        # Collect
-        R_gripper2base.append(T_gb[:3,:3])
-        t_gripper2base.append(T_gb[:3,3])
-        R_target2cam.append(T_tc[:3,:3])
-        t_target2cam.append(T_tc[:3,3])
+        R_gripper2base.append(T_gb[:3, :3])
+        t_gripper2base.append(T_gb[:3, 3])
+        R_target2cam.append(T_tc[:3, :3])
+        t_target2cam.append(T_tc[:3, 3])
 
-        print(f"[{i}] Captured necessary data.")
+        print(f"[{i}] captured OK.")
 
-    # =========================================
-    # Hand–Eye (Eye-to-Hand)
-    # =========================================
+    if len(R_gripper2base) < 3:
+        print("Not enough valid poses for hand-eye calibration.")
+        return None
+
+    print("\nCalibrating...")
     R_cam2gripper, t_cam2gripper = cv2.calibrateHandEye(
         R_gripper2base, t_gripper2base,
         R_target2cam,   t_target2cam,
@@ -203,20 +181,17 @@ def handeye_eye_to_hand():
     )
 
     T_gc = np.eye(4)
-    T_gc[:3,:3] = R_cam2gripper
-    T_gc[:3,3]  = t_cam2gripper.reshape(3,)
+    T_gc[:3, :3] = R_cam2gripper
+    T_gc[:3, 3] = t_cam2gripper.reshape(3,)
 
-    # base→camera を求めるために
-    # 最初の姿勢の base→gripper を再取得
+    # 最初の姿勢の base→gripper を使って base→camera を算出
     p0 = get_robot_pose(arm)
     T_bg0 = pose_to_matrix_base2gripper(p0)
-
-    # base → camera
     T_bc = T_bg0 @ T_gc
 
     print("\n===== RESULT: base → camera =====")
     print(T_bc)
-    print("\nCamera origin (base frame):", T_bc[:3,3])
+    print("\nCamera origin (base frame):", T_bc[:3, 3])
 
     return T_bc
 
@@ -224,10 +199,6 @@ def handeye_eye_to_hand():
 # ============================================
 # 6. 実行
 # ============================================
+
 if __name__ == "__main__":
     T_base_cam = handeye_eye_to_hand()
-
-    if T_base_cam is not None:
-        P_cam = np.array([0.0, 0.0, 0.30])
-        P_base = transform_cam_to_base = T_base_cam @ np.array([P_cam[0], P_cam[1], P_cam[2],1])
-        print("\nTransform test (camera→base):", P_base[:3])
