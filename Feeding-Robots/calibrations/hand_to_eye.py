@@ -31,11 +31,20 @@ def init_realsense():
 def init_xarm(ip="192.168.1.199"):
     arm = XArmAPI(ip)
     arm.motion_enable(True)
-    arm.set_mode(1)
-    arm.set_state(0)
-    time.sleep(1)
-    return arm
+    # motion_enableが完了するまで十分に待つ
+    time.sleep(2)  # 2秒間に延長
 
+    # 1:位置制御モード (PTP)
+    arm.set_mode(1)
+    # 0:稼働状態 (Enable)
+    arm.set_state(0)
+    # モード/状態設定が反映されるまで待つ
+    time.sleep(1) # ここも1秒に延長
+    
+    # ロボットが確実に動ける状態か確認するためのダミー移動（オプション）
+    # arm.set_position(x, y, z, rx, ry, rz, is_radian=False, speed=100, wait=True)
+    
+    return arm
 
 def get_robot_pose(arm):
     """xArm の TCP pose を2回読んで平均を取る"""
@@ -124,22 +133,36 @@ def handeye_eye_to_hand():
 
     # ★ あなたが指定した pose_list をそのまま使用 ★
     pose_list = [
-        [390.1, 27.7, 211.4, -91.7, 4.7, -92.2],
-        [390.1, 200, 211.4,  -50, 0, -70],
-        [390.1, 200, 190,  -30, -10, -50],
-        [420, 200, 190,  0, 5, -30],
-        [420, 0, 190,  20, -20, -40],
-        [280, 0, 240, -30 -40, 0, -60],  # -30-40 は -70 として評価される
-        [390.1, 27.7, 211.4, -91.7, 4.7, -92.2],
-    ]
+        # === 基準姿勢（必ず見える）===
+        [390,  30, 210,  -90,    0,  -90],   # 基準
+        
+        # === X軸方向の回転（上下に向ける）===
+        [390,  30, 210,  -45,    0,  -90],   # 上向き気味
+        [390,  30, 210, -135,    0,  -90],   # 下向き気味
 
+        # === Y軸方向の回転（左右に傾ける）===
+        [390,  30, 210,  -90,   45,  -90],   # 右に傾ける
+        [390,  30, 210,  -90,  -45,  -90],   # 左に傾ける
+
+        # === Z軸方向（ひねり）===
+        [390,  30, 210,  -90,    0,  -45],   # ひねり1
+        [390,  30, 210,  -90,    0, -135],   # ひねり2
+
+        # === 少しだけ位置をズラす（検出の安定性向上）===
+        [360,  30, 210,  -90,    0,  -90],   # X方向へ
+        [420,  30, 210,  -90,    0,  -90],   # X方向へ
+    ]
     print("=== Start Eye-to-Hand Calibration (Aruco) ===")
 
     for i, pose in enumerate(pose_list):
         x, y, z, rx_deg, ry_deg, rz_deg = pose
+        code = arm.set_position(x, y, z, rx_deg, ry_deg, rz_deg,
+                        speed=20, mvacc=2000, wait=True)
+        print(f"[{i}] set_position return code = {code}")
 
-        arm.set_position(x, y, z, rx_deg, ry_deg, rz_deg,
-                         speed=20, mvacc=2000, wait=True)
+        p_now = arm.get_position(is_radian=True)
+        print(f"[{i}] robot pose now = {p_now}")
+
         time.sleep(0.8)
 
         # ① base→gripper
