@@ -166,6 +166,19 @@ class PI160Controller:
         print(f"✓ パレット画像取得成功: {img_bgr.shape}")
         return img_bgr
 
+    def capture_frame(self):
+        """
+        ThermalGPTが期待する形式で 1 フレーム（カラー画像 + 温度データ）を返す。
+        """
+        palette = self.get_palette_image()     # BGR可視画像
+        raw     = self.get_thermal_data()      # 温度マップ
+
+        if palette is None or raw is None:
+            print("✗ capture_frame：フレーム取得失敗")
+            return None, None
+
+        return palette, raw
+
 
     def disconnect(self):
         """カメラ切断"""

@@ -184,9 +184,6 @@ RGB は使用しません。
         print(f"取得温度: max={temp_max:.2f}℃")
 
         # ---- 2. Save image ----
-        if save_image:
-            self.save_debug_image(palette, temperature)
-
         # ---- 3. GPT safety check ----
         result = self.ask_gpt_temperature_judgement(temp_max, target_temp)
 
