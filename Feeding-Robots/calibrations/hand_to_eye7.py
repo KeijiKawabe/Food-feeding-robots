@@ -81,6 +81,88 @@ def rt_to_matrix(rvec, tvec):
     T[:3, :3] = R
     T[:3, 3] = tvec.reshape(3)
     return T
+import numpy as np
+
+def residual_SE3(A, X, B):
+    """
+    AX = XB のズレ || A*X - X*B || を評価
+    出力:
+        平行移動誤差 [mm], 回転誤差 [deg]
+    """
+    left  = A @ X
+    right = X @ B
+    T_err = np.linalg.inv(left) @ right
+
+    # 回転誤差
+    R = T_err[:3, :3]
+    cos_angle = (np.trace(R) - 1.0) / 2.0
+    cos_angle = np.clip(cos_angle, -1.0, 1.0)
+    angle = np.arccos(cos_angle)
+    rot_deg = np.degrees(abs(angle))
+
+    # 並進誤差 [mm]
+    trans_mm = np.linalg.norm(T_err[:3, 3]) * 1000.0
+    return trans_mm, rot_deg
+
+
+def check_handeye_quality(R_g2b_list, t_g2b_list,
+                          R_t2c_list, t_t2c_list,
+                          X):
+    """
+    R_g2b_list, t_g2b_list : Gripper → Base （OpenCVの入力形式）
+    R_t2c_list, t_t2c_list : Target  → Camera（OpenCVの入力形式）
+    X                     : Base → Camera の4x4変換
+
+    AX = XB の内部残渣から，Calibrationの純粋精度を評価
+    """
+
+    n = len(R_g2b_list)
+    residuals_t = []
+    residuals_r = []
+
+    for i in range(n - 1):
+
+        # ---- Base transform G_i, G_j ----
+        G_i = np.eye(4)
+        G_i[:3, :3] = R_g2b_list[i]
+        G_i[:3, 3]  = t_g2b_list[i]
+
+        G_j = np.eye(4)
+        G_j[:3, :3] = R_g2b_list[i + 1]
+        G_j[:3, 3]  = t_g2b_list[i + 1]
+
+        # A = G_i^{-1} * G_j
+        A = np.linalg.inv(G_i) @ G_j
+
+
+        # ---- Camera transform C_i, C_j ----
+        C_i = np.eye(4)
+        C_i[:3, :3] = R_t2c_list[i]
+        C_i[:3, 3]  = t_t2c_list[i]
+
+        C_j = np.eye(4)
+        C_j[:3, :3] = R_t2c_list[i + 1]
+        C_j[:3, 3]  = t_t2c_list[i + 1]
+
+        # B = C_i * C_j^{-1}
+        B = C_i @ np.linalg.inv(C_j)
+
+
+        # ---- residual ----
+        terr, rerr = residual_SE3(A, X, B)
+        residuals_t.append(terr)
+        residuals_r.append(rerr)
+
+    # Convert to arrays
+    residuals_t = np.array(residuals_t)
+    residuals_r = np.array(residuals_r)
+
+    print("\n=== Hand-Eye Internal Residuals (AX = XB) ===")
+    print(f"Translation RMS : {np.sqrt(np.mean(residuals_t**2)):.3f} mm")
+    print(f"Rotation RMS    : {np.sqrt(np.mean(residuals_r**2)):.3f} deg")
+    print(f"Max translation : {np.max(residuals_t):.3f} mm")
+    print(f"Max rotation    : {np.max(residuals_r):.3f} deg")
+    print("=============================================\n")
 
 
 # ===============================
@@ -100,18 +182,26 @@ def handeye():
     t_target2cam = []
 
     # ↓必要な姿勢だけセット（あなたの自由）
-    pose_list = [
-        [280, 30, 240, -90,  0, -90],
-        [310, 30, 240, -90,  0, -90],
-        [340, 30, 240, -90,  0, -90],
-        [400, 30, 240, -90,  0, -90],
-        [280, 90, 240, -90,  0, -90],
-        [280, -30, 240, -90,  0, -90],
-        [280, -100, 240, -90,  0, -90],
-        [280, 30, 200, -90,  0, -90],
-        [280, 30, 280, -90,  0, -90],
-        [340, -50, 200, -90,  0, -90],
-        [340, 90, 280, -90,  0, -90],        
+
+
+    pose_list = [     
+        [280, -150, 220, -90, 0, -90],
+        [320, -100, 240, -90, 0, -90],
+        [360, -50, 260, -90, 0, -90],
+        [400, 0, 220, -90, 0, -90],
+        [420, 50, 240, -90, 0, -90],
+
+        [280, 100, 260, -90, 0, -90],
+        [320, 80, 280, -90, 0, -90],
+        [360, 60, 220, -90, 0, -90],
+        [400, 30, 300, -90, 0, -90],
+        [420, -20, 260, -90, 0, -90],
+
+        [300, -120, 300, -90, 0, -90],
+        [350, -80, 200, -90, 0, -90],
+        [390, 10, 270, -90, 0, -90],
+        [330, 40, 230, -90, 0, -90],
+        [380, 90, 250, -90, 0, -90], 
         [280, 30, 240, -60,  0, -90],
         [280, 30, 240, -100,  0, -90],
         [280, 30, 240, -50,  0, -90],
@@ -122,7 +212,6 @@ def handeye():
         [280, 30, 240, -90,  0, -120],
         [280, 30, 240, -90,  0, -90],
     ]
-
 
 
     print("=== Collecting Samples ===")
@@ -184,6 +273,12 @@ def handeye():
     for row in T:
         print(row)
     print("=================================\n")
+
+    check_handeye_quality(
+        R_gripper2base, t_gripper2base,
+        R_target2cam,  t_target2cam,
+        T
+    )
 
     return T
 
