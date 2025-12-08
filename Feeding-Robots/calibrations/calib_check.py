@@ -9,7 +9,7 @@ import math
 # 1. 設定
 # ===============================
 ARUCO_DICT = cv2.aruco.DICT_6X6_250
-MARKER_LENGTH_M = 0.028  # 28mm
+MARKER_LENGTH_M = 0.0265  # 28mm
 
 camera_matrix = np.array([
     [389.846, 0, 321.177],
