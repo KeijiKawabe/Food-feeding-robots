@@ -216,3 +216,44 @@ RGB は使用しません。
     # -----------------------------
     def cleanup(self):
         self.camera.disconnect()
+    
+        # -----------------------------
+    # RGB 認識より前に「次に食べる食材」を決める関数
+    # -----------------------------
+    def decide_next_food(self, history=None):
+        """
+        Thermal 画像 → 区域温度の計算 → GPT 判定
+        という1セットの処理を行い、
+        PerceptionPipeline に渡すべき next_food を返す。
+
+        出力例：
+        {
+            "next_food": "curry",
+            "too_hot": false,
+            "reason": "...",
+            "area_temps": {...}
+        }
+        """
+        # 1) Thermal capture
+        thermal = self.capture()
+        if thermal is None:
+            return {
+                "next_food": None,
+                "too_hot": None,
+                "reason": "thermal_capture_failed",
+                "area_temps": None
+            }
+
+        data, _ = thermal
+
+        # 2) 区域温度の計算
+        area_temps = self.compute_area_temps(data)
+
+        # 3) GPT に意思決定させる
+        decision = self.ask_gpt(area_temps, history)
+
+        # 4) デバッグ用途で温度も返す
+        decision["area_temps"] = area_temps
+
+        return decision
+

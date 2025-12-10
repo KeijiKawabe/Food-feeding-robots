@@ -1,5 +1,6 @@
 # src/planner/task_planner.py
-
+from openai import OpenAI
+import json
 class TaskPlanner:
     """
     RGB（SAM2 + CLIP）と Thermal（GPT）の結果を統合し、

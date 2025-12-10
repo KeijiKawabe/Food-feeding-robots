@@ -1,4 +1,4 @@
-from xarm.wrapper import XarmAPI
+from xarm.wrapper import XArmAPI
 import os
 import time
 import csv

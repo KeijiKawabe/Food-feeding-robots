@@ -10,6 +10,7 @@ import clip
 from PIL import Image
 from typing import Dict, List, Optional
 
+
 class ClipScorer:
     def __init__(self, device="cuda", model_name="ViT-B/32",
                  prompts: Optional[Dict[str, List[str]]] = None,
@@ -95,3 +96,32 @@ class ClipScorer:
 
         idx = int(np.argmax(scores))
         return {"index": idx, "cls": target_label, "score": float(scores[idx])}
+    def score_single(self, crop_rgb):
+        """
+        crop に対して全ラベル分の CLIP スコアを返す（デバッグ用）
+        出力: { "Yogurt": 23.1, "curry": 12.5, ... }
+        """
+
+        # ==== 1) 画像 → image feature ====
+        image = Image.fromarray(crop_rgb)
+        img_tensor = self.preprocess(image).unsqueeze(0).to(self.device)
+
+        # FP16 許可されているなら AMP
+        if self.use_image_amp:
+            with torch.cuda.amp.autocast():
+                img_feat = self.model.encode_image(img_tensor)
+        else:
+            img_feat = self.model.encode_image(img_tensor)
+
+        img_feat = img_feat / img_feat.norm(dim=-1, keepdim=True)  # normalize
+
+        # ==== 2) すでに計算済みの text_feat と比較 ====
+        # self.text_feat = { "curry": tensor([1,D]), ... }
+        scores = {}
+        for cls, tfeat in self.text_feat.items():   # tfeat shape: [1, D]
+            sim = (img_feat @ tfeat.T) * 100.0       # → shape [1,1]
+            scores[cls] = float(sim.item())
+
+        return scores
+
+

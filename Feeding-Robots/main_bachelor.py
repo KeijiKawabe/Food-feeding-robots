@@ -192,9 +192,21 @@ def build_manual_clip_prompts() -> Dict[str, Any]:
     必要に応じてここを編集すればよい。
     """
     return {
-        "Yogurt": ["a plate of yogurt", "natural white yogurt"],
-        "curry":  ["a plate of fruit", "a photo of Japanese brown curry"],
-        "okayuu": ["a plate of okayuu", "a plate of Japanese rice porridge"]
+    "Yogurt": [
+        "a bowl of white yogurt",
+        "plain yogurt on a white plate",
+        "creamy white yogurt food"
+    ],
+    "curry": [
+        "Japanese brown curry on a plate",
+        "a dish of rice with curry sauce",
+        "brown curry food"
+    ],
+    "okayuu": [
+        "Japanese rice porridge",
+        "a bowl of white rice porridge",
+        "okayuu rice porridge food"
+    ]
         # 他の食材があれば追加
     }
 
@@ -255,8 +267,7 @@ Output strictly in JSON:
         return {}
 
 
-def assign_plate_id(center_px: Optional[Tuple[int, int]],
-                    plate_rgb_zones: Dict[str, Tuple[int, int, int, int]]) -> Optional[str]:
+def assign_plate_id(center_px: Optional[Tuple[int, int]]):
     """
     CLIP+SAM2 で得た中心画素 center_px = (x, y) が、
     RGB画像上のどの Plate 矩形内にあるかを判定して plate_id を返す。
@@ -288,9 +299,9 @@ def assign_plate_id(center_px: Optional[Tuple[int, int]],
     min_dist = 1e9
     best_plate_id = None
     plate_centers = [
-    {"id": 1, "center": plate1_center}, 
-    {"id": 2, "center": plate2_center},
-    {"id": 3, "center": plate3_center},
+    {"id": "Plate1", "center": plate1_center}, 
+    {"id": "Plate2", "center": plate2_center},
+    {"id": "Plate3", "center": plate3_center},
 ]
 
     for plate in plate_centers:
@@ -318,7 +329,7 @@ def get_thermal_region_for_food(
         print(f"⚠ Thermal ゾーンが定義されていません: plate={plate_id}, label={food_label}")
         return None
 
-    y1, y2, x1, x2 = THERMAL_ZONES[key]
+    y1, y2, x1, x2 = THERMAL_ZONES[plate_id]
 
     # 画像サイズにクリップ
     h, w = thermal_data.shape[:2]
@@ -368,8 +379,18 @@ def main():
     align_to = rs.stream.color
     align = rs.align(align_to)
 
-    # --- Thermal GPT System（カメララッパとして利用） ---
-    thermal_system = ThermalGPTSystem(openai_api_key=api_key, target_temp=SAFE_TEMP_MAX)
+    # --- Thermal GPT: decide next food BEFORE object detection ---
+    # 食事履歴（ここでは plate_id ベースで記録）
+    eat_history: List[str] = []
+    thermal_gpt_system = ThermalGPTSystem(api_key)
+    thermal_decision = thermal_gpt_system.decide_next_food(history=eat_history)
+    next_food = thermal_decision.get("next_food")
+    print("LLM says next_food =", next_food)
+
+    if next_food is None:
+        print("⚠ LLM が次の食材を決められませんでした → スキップ")
+        return
+
 
     # --- PerceptionPipeline (SAM2 + CLIP) 初期化 ---
     if not os.path.exists(SAM2_CFG):
@@ -386,15 +407,15 @@ def main():
         sam2_ckpt=SAM2_CKPT,
         device="cuda",
         maskgen_interval=1,
-        min_area=1000,
+        min_area=0,
         max_area_frac=0.5,
         clip_model="ViT-B/32",
         clip_prompts=clip_prompts,
         enable_depth=True,
     )
+    print(clip_prompts)
 
-    # 食事履歴（ここでは plate_id ベースで記録）
-    eat_history: List[str] = []
+
 
     try:
         while True:
@@ -416,6 +437,8 @@ def main():
 
             depth_image = np.asanyarray(depth_frame.get_data())   # (H, W), uint16, mm
             color_image = np.asanyarray(color_frame.get_data())   # (H, W, 3), BGR
+            cv2.imwrite("debug_raw_color.png", color_image)
+            print("✓ Saved raw RGB image before SAM2/CLIP: debug_raw_color.png")
 
             # --- オプション: GPT から CLIP プロンプト生成 ---
             if PROMPT_MODE == "llm":
@@ -424,34 +447,61 @@ def main():
                     pipe.update_clip_prompts(auto_prompts)
 
             # --- RGB パイプライン (SAM2 + CLIP + Depth) ---
-            rgb_out = pipe.process_frame(color_image, depth_frame=depth_image)
-            label = rgb_out.get("label")          # 例: "Yogurt"
+            rgb_out = pipe.process_frame(
+                color_image,
+                depth_frame=depth_image,
+                target_label=next_food,   # ← 追加
+            )
+            # label = rgb_out.get("label")          # 例: "Yogurt"
             bbox = rgb_out.get("bbox")
             center_px = rgb_out.get("center_px")  # (x, y)
             depth_m = rgb_out.get("depth_m")
             fps = rgb_out.get("fps")
 
+
             print("\n--- RGB Perception ---")
-            print("label    :", label)
+            print("label :", next_food)
             print("bbox     :", bbox)
             print("center_px:", center_px)
             print("depth_m  :", depth_m)
             print("fps      :", fps)
 
+            # =======================
+            # デバッグ：SAM2 マスク
+            # =======================
+            mask = rgb_out.get("mask")
+            if mask is not None:
+                vis_mask = draw_mask_on_image(color_image.copy(), mask)
+                cv2.imwrite("debug_sam2_mask.png", vis_mask)
+                print("✓ SAM2 mask saved: debug_sam2_mask.png")
+            else:
+                print("⚠ SAM2 mask is None")
+
+            # =======================
+            # デバッグ：CLIP に渡された crop
+            # =======================
+            if bbox is not None:
+                x1, y1, x2, y2 = bbox
+                crop = color_image[y1:y2, x1:x2]
+                cv2.imwrite("debug_clip_crop.png", crop)
+                print("✓ CLIP crop saved: debug_clip_crop.png")
+            else:
+                print("⚠ bbox is None → CLIP crop not saved")
+
             if label is None or center_px is None:
-                print("⚠ 食材が認識できませんでした。次のループへ。")
-                continue
+                            print("⚠ 食材が認識できませんでした。次のループへ。")
+                            continue
 
             # --- 中心位置からどの Plate 上か判定 ---
-            plate_id = assign_plate_id(center_px, PLATE_RGB_ZONES)
+            plate_id = assign_plate_id(center_px)
             if plate_id is None:
                 print("⚠ 中心位置がどの Plate 領域にも属しません。次のループへ。")
                 continue
 
-            print(f"Detected food '{label}' on {plate_id}")
+            print(f"Detected food '{next_food} on {plate_id}")
 
             # --- Thermal から温度取得 ---
-            thermal = thermal_system.capture()
+            thermal = thermal_gpt_system.capture()
             if thermal is None:
                 print("⚠ Thermal 画像取得に失敗。次のループへ。")
                 continue
@@ -480,7 +530,7 @@ def main():
             # --- LLM 用の plates_info を作成（今回は1つだけだが plate_id ベース） ---
             plate_info = {
                 "plate_id": plate_id,
-                "food_label": label,
+                "food_label": next_food,
                 "temp": temp_stats,
                 "times_eaten": eat_history.count(plate_id),
             }
@@ -514,7 +564,7 @@ def main():
             if chosen_plate_id is None:
                 chosen_plate_id = plate_id
             if chosen_label is None:
-                chosen_label = label
+                chosen_label = next_food
 
             # --- OK: ロボットを動かす（plate_id ベースで traj 再生） ---
             traj_path = TRAJ_MAP.get(chosen_plate_id)
@@ -541,13 +591,6 @@ def main():
             if bbox is not None:
                 x1, y1, x2, y2 = bbox
                 cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            # Plate 領域の可視化（デバッグ用）
-            for pid, (py1, py2, px1, px2) in PLATE_RGB_ZONES.items():
-                color = (255, 0, 0) if pid == plate_id else (128, 128, 128)
-                cv2.rectangle(vis, (px1, py1), (px2, py2), color, 1)
-                cv2.putText(vis, pid, (px1 + 5, py1 + 20),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 1, cv2.LINE_AA)
-
             cv2.imshow("Feeding Perception (RGB + SAM2 + CLIP)", vis)
             print("  → ウィンドウに RGB 認識結果を表示しました。何かキーを押すと閉じます。")
             cv2.waitKey(0)

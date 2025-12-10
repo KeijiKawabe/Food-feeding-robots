@@ -1,6 +1,8 @@
 # src/pipeline.py
 
 import time
+import os
+import cv2
 from typing import Dict, Any, Optional
 
 import numpy as np
@@ -12,6 +14,7 @@ from .utils.misc import (
 )
 from .perception.sam2_wrapper import SAM2Engine
 from .perception.clip_scorer import ClipScorer
+
 
 
 class PerceptionPipeline:
@@ -122,6 +125,67 @@ class PerceptionPipeline:
     # --------------------------------------------------
     # メイン処理
     # --------------------------------------------------
+
+    def process_frame_multi(self, image_bgr):
+        """
+        SAM2 + CLIP により、画像中の全 food candidate を返す関数。
+
+        出力例:
+        [
+            {"label": "Yogurt", "bbox": [...], "center_px": (cx, cy), "score": 22.4},
+            {"label": "curry",  "bbox": [...], "center_px": (cx, cy), "score": 21.0},
+            ...
+        ]
+        """
+
+        results = []
+
+        # ---------- 1) SAM2 mask generation ----------
+        masks = self.sam.generate_masks(image_bgr)
+
+
+        # masks は list[dict] 形式を想定（mask, bbox, score など）
+
+        if masks is None or len(masks) == 0:
+            print("⚠ SAM2 returned no masks")
+            return results
+
+        # ---------- 2) Each mask → CLIP scoring ----------
+        for idx, m in enumerate(masks):
+            bbox = m["bbox"]  # (x0, y0, x1, y1)
+            x0, y0, x1, y1 = map(int, bbox)
+            crop = image_bgr[y0:y1, x0:x1]
+
+            if crop.size == 0:
+                continue
+
+            # CLIP scoring (returns dict: {"Yogurt": score, "curry": score, ...})
+            score_dict = self.clip.score_single(crop)
+            if score_dict is None:
+                continue
+
+            # best label
+            best_label = max(score_dict, key=score_dict.get)
+            best_score = score_dict[best_label]
+
+            # center of bbox
+            cx = (x0 + x1) / 2
+            cy = (y0 + y1) / 2
+
+            results.append({
+                "label": best_label,
+                "score": float(best_score),
+                "bbox": bbox,
+                "center_px": (cx, cy),
+            })
+
+        # ---------- 3) DEBUG: show recognized instances ----------
+        print("\n=== Multi-food detection result ===")
+        for r in results:
+            print(f"Label={r['label']} score={r['score']:.2f} center={r['center_px']}")
+
+        return results
+
     def process_frame(
         self,
         frame_bgr: np.ndarray,
@@ -160,6 +224,7 @@ class PerceptionPipeline:
             # --- SAM2 で「全マスク」を生成 ---
             self.sam.set_image(rgb)  # ここが高コスト
             masks = self.sam.generate_masks(rgb)
+            print(f"DEBUG: SAM2 generated {len(masks)} raw masks.") # マスク候補の数
 
             # --- 小さすぎる/大きすぎるマスクをフィルタ ---
             masks = filter_masks_by_area(
@@ -172,6 +237,27 @@ class PerceptionPipeline:
 
             # --- マスクごとに crop & bbox を作成 ---
             crops, bboxes = masks_to_crops_and_bboxes(rgb, masks)
+            print(f"DEBUG: After area filter, {len(masks)} masks remain.")
+            # =============================
+            # DEBUG: Save all crops & CLIP scores
+            # =============================
+            debug_dir = "debug_crops"
+            os.makedirs(debug_dir, exist_ok=True)
+
+            print("\n--- DEBUG: CLIP crop & score list ---")
+
+            for i, crop in enumerate(crops):
+                # crop 保存
+                crop_path = os.path.join(debug_dir, f"crop_{i:02d}.png")
+                cv2.imwrite(crop_path, cv2.cvtColor(crop, cv2.COLOR_RGB2BGR))
+
+                # 全ラベルに対するスコアを計算
+                score_dict = self.clip.score_single(crop)
+
+                print(f"[Crop {i:02d}] {crop_path}")
+                for label, score in score_dict.items():
+                    print(f"    {label:10s} : {score:.4f}")
+
 
             if crops:
                 if target_label is None:
@@ -257,3 +343,7 @@ class PerceptionPipeline:
             "depth_m": self.last["depth_m"],
             "fps": self.ema_fps,
         }
+    
+
+
+
