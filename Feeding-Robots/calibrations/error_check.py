@@ -2,191 +2,169 @@ import cv2
 import numpy as np
 import pyrealsense2 as rs
 from xarm.wrapper import XArmAPI
+from scipy.spatial.transform import Rotation as R
 import time
-import math
 
-# ===============================
-# 1. 設定
-# ===============================
-ARUCO_DICT = cv2.aruco.DICT_6X6_250
-MARKER_LENGTH_M = 0.028  # 28 mm
-
-camera_matrix = np.array([
-    [389.846, 0, 321.177],
-    [0, 389.846, 235.201],
-    [0, 0, 1]
-])
-dist_coeffs = np.zeros(5)
-
-# Hand-eye で求めた Base→Camera
+# =============================
+# 必要な行列パラメータ
+# =============================
+# --- 手眼キャリブレーションで求めた Base→Camera ---
 T_base_camera = np.array([
-    [-0.79506212, -0.22989224,  0.56127158,  0.30186471],
-    [-0.50617810,  0.76131737, -0.40519081,  0.03398601],
-    [-0.33415558, -0.60625524, -0.72166102,  0.26712413],
-    [0.0, 0.0, 0.0, 1.0],
+    [ 0.86581087, -0.13502627, -0.48180851, -13.0905596 ],
+    [ 0.49130086,  0.04689409,  0.86972663, -198.188808 ],
+    [-0.09484197, -0.98973171,  0.10693994, -106.769127 ],
+    [ 0.0,         0.0,         0.0,          1.0        ]
 ])
 
-# マーカーのオフセット（TCP→Marker の距離）
-MARKER_OFFSET = 0.028  # [m] = 28mm
 
-# マーカーの上 +10mm の安全マージン
-SAFE_Z_OFFSET = 0.05  # [m] = 10mm
-
-
-# ===============================
-# 2. ワークスペースチェック
-# ===============================
-def CheckIfNewPositionInWorkspace(x, y, z):
-    """
-    x, y, z: [mm] 単位の Base 座標
-    True ならワークスペース内、False なら外
-    """
-    if x > 680 or x < 300:
-        return False
-    if y < -330 or y > 420:
-        return False
-    if z < 94 or z > 550:
-        return False
-    return True
+# --- TCP → Marker の位置関係（固定値） ---
+# 例：マーカー中心が TCP の上方向に 3cm
+T_gripper_marker = np.eye(4)
+T_gripper_marker[:3, 3] = np.array([0.00, 0.00, 0.23])
 
 
-# ===============================
-# 3. xArm 姿勢 → 4×4行列
-# ===============================
-def pose_to_matrix(p):
-    x, y, z, rx, ry, rz = p
+# =============================
+# RealSense + ArUco 設定
+# =============================
+ARUCO_DICT = cv2.aruco.DICT_6X6_250
+MARKER_LENGTH = 0.076
 
-    Rx = np.array([
-        [1, 0, 0],
-        [0, math.cos(rx), -math.sin(rx)],
-        [0, math.sin(rx), math.cos(rx)]
-    ])
-    Ry = np.array([
-        [math.cos(ry), 0, math.sin(ry)],
-        [0, 1, 0],
-        [-math.sin(ry), 0, math.cos(ry)]
-    ])
-    Rz = np.array([
-        [math.cos(rz), -math.sin(rz), 0],
-        [math.sin(rz),  math.cos(rz), 0],
-        [0, 0, 1]
-    ])
+fx, fy = 608.54150390625, 607.1893920898438
+cx, cy = 309.4483947753906, 264.0105285644531
+camera_matrix = np.array([[fx, 0, cx],
+                          [0, fy, cy],
+                          [0, 0, 1]], dtype=np.float32)
+dist_coeffs = np.zeros(5, dtype=np.float32)
 
-    R = Rz @ Ry @ Rx
+
+def rt_to_matrix(R_mat, tvec):
     T = np.eye(4)
-    T[:3, :3] = R
-    T[:3, 3] = np.array([x, y, z]) / 1000.0  # mm → m
-    return T
-
-
-# ===============================
-# 4. solvePnP → 4×4行列
-# ===============================
-def rt_to_matrix(rvec, tvec):
-    R, _ = cv2.Rodrigues(rvec)
-    T = np.eye(4)
-    T[:3, :3] = R
+    T[:3, :3] = R_mat
     T[:3, 3] = tvec.reshape(3)
     return T
 
 
-# ===============================
-# 5. タスク誤差測定メイン
-# ===============================
-def task_error_test():
+# =============================
+# RealSense capture
+# =============================
+def capture_frame(pipeline):
+    frames = pipeline.wait_for_frames()
+    color = frames.get_color_frame()
+    return np.asanyarray(color.get_data())
 
-    # --- RealSense 初期化 ---
+
+# =============================
+# ArUco Pose Detection
+# =============================
+def detect_marker_pose(image):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # --- Dictionary の互換処理 ---
+    try:
+        aruco_dict = cv2.aruco.getPredefinedDictionary(ARUCO_DICT)
+    except AttributeError:
+        aruco_dict = cv2.aruco.Dictionary_get(ARUCO_DICT)
+
+    # --- DetectorParameters の互換処理 ---
+    try:
+        parameters = cv2.aruco.DetectorParameters()
+    except:
+        parameters = cv2.aruco.DetectorParameters_create()
+
+    corners, ids, _ = cv2.aruco.detectMarkers(
+        gray, aruco_dict, parameters=parameters
+    )
+
+    if ids is None:
+        return None
+
+    rvec, tvec, _ = cv2.aruco.estimatePoseSingleMarkers(
+        corners, MARKER_LENGTH, camera_matrix, dist_coeffs
+    )
+
+    R_mat, _ = cv2.Rodrigues(rvec[0][0])
+    t = tvec[0][0]
+
+    return rt_to_matrix(R_mat, t)
+
+
+# =============================
+# 誤差評価メイン
+# =============================
+def main():
+
+    # --- RealSense ---
     pipeline = rs.pipeline()
     config = rs.config()
     config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
     pipeline.start(config)
 
-    # --- xArm 初期化 ---
+    # --- xArm ---
     arm = XArmAPI("192.168.1.199")
     arm.motion_enable(True)
     arm.set_mode(0)
     arm.set_state(0)
-    time.sleep(1.0)
+    time.sleep(1)
 
-    aruco_dict = cv2.aruco.getPredefinedDictionary(ARUCO_DICT)
-    params = cv2.aruco.DetectorParameters()
-
-    print("=== Task Error Test (marker上 +10mm に移動) ===")
+    print("\n=== Hand-Eye 誤差評価（直接法）===")
+    print("ロボットを様々な姿勢に動かし、Enterで測定、qで終了\n")
 
     while True:
-        # ① カメラで Marker を検出
-        frames = pipeline.wait_for_frames()
-        img = np.asanyarray(frames.get_color_frame().get_data())
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-        corners, ids, _ = cv2.aruco.detectMarkers(gray, aruco_dict, parameters=params)
-
-        if ids is None:
-            print("No marker detected.")
-            cv2.imshow("img", img)
-            if cv2.waitKey(1) == ord('q'):
-                break
-            continue
-
-        rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
-            corners, MARKER_LENGTH_M, camera_matrix, dist_coeffs
-        )
-
-        # Marker→Camera
-        T_mc = rt_to_matrix(rvecs[0], tvecs[0])
-
-        # Base→Marker（カメラ推定）
-        T_bm_camera = T_base_camera @ T_mc
-        p_marker = T_bm_camera[:3, 3]  # [m]
-
-        # マーカー上 +10mm の安全ターゲット
-        safe_target = p_marker + np.array([0.0, 0.0, SAFE_Z_OFFSET])
-
-        # TCPオフセットを考慮した TCP 目標位置（[m]）
-        tcp_goal = safe_target - np.array([0.0, 0.0, MARKER_OFFSET])
-
-        # m → mm 変換
-        x_mm, y_mm, z_mm = tcp_goal * 1000.0
-
-        print("\n--- New Target ---")
-        print("Marker (base) [m]:          ", p_marker)
-        print("Safe target Z+10mm [m]:     ", safe_target)
-        print("TCP goal (base) [m]:        ", tcp_goal)
-        print("TCP goal (base) [mm]:       ", x_mm, y_mm, z_mm)
-
-        # ② ワークスペースチェック
-        if not CheckIfNewPositionInWorkspace(x_mm, y_mm, z_mm):
-            print("⚠ Workspace limit exceeded! Robot will NOT move.")
-            cv2.imshow("img", img)
-            if cv2.waitKey(1) == ord('q'):
-                break
-            continue
-
-        print("✅ In workspace. Moving robot...")
-
-        # ③ ロボットを TCP ゴール位置へ移動
-        arm.set_position(
-            float(x_mm), float(y_mm), float(z_mm),
-            speed=20, mvacc=2000,
-            wait=True
-        )
-        time.sleep(0.5)
-
-        # ④ 実際の TCP 位置を取得
-        tcp_actual_pose = arm.get_position(is_radian=True)[1]
-        T_bg_actual = pose_to_matrix(tcp_actual_pose)
-        p_robot = T_bg_actual[:3, 3]  # [m]
-
-        # ⑤ タスク誤差を計算（安全ターゲットに対する誤差でもOK）
-        task_error = np.linalg.norm(p_robot - tcp_goal)
-
-        print("Actual TCP (base) [m]:      ", p_robot)
-        print("Task Error (m):             ", task_error)
-
-        cv2.imshow("img", img)
-        if cv2.waitKey(1) == ord('q'):
+        key = input("Enter → 測定  /  q → 終了 : ")
+        if key == "q":
             break
+
+        # --- カメラで Marker 取得 ---
+        img = capture_frame(pipeline)
+        T_camera_marker = detect_marker_pose(img)
+        if T_camera_marker is None:
+            print("❌ マーカー未検出")
+            continue
+
+        # --- Robot Base → TCP 取得 ---
+        pose = arm.get_position(is_radian=False)[1]
+        x, y, z, roll, pitch, yaw = pose
+        Rg = R.from_euler("xyz", [roll, pitch, yaw], degrees=True).as_matrix()
+
+        T_base_gripper = np.eye(4)
+        T_base_gripper[:3, :3] = Rg
+        T_base_gripper[:3, 3] = np.array([x/1000, y/1000, z/1000])
+
+
+        # =============================
+        # ① Robot 側の Hand (TCP) 位置
+        # =============================
+        P_robot = T_base_gripper[:3, 3]
+
+
+        # =============================
+        # ② Camera 経由の Hand 位置
+        # =============================
+        T_base_marker = T_base_camera @ T_camera_marker
+        T_base_hand_est = T_base_marker @ T_gripper_marker
+
+
+
+        P_camera = T_base_hand_est[:3, 3]
+        print(P_camera)
+        print(P_robot)
+
+        # =============================
+        # ③ 誤差
+        # =============================
+        error = P_camera - P_robot
+        norm_mm = np.linalg.norm(error) * 1000
+
+        print("\n--- New Sample ---")
+        print("Robot hand pos (m):     ", P_robot)
+        print("Camera-estimated pos:   ", P_camera)
+        print("Diff (m):               ", error)
+        print(f"Error norm:             {norm_mm:.2f} mm")
+
+
+    pipeline.stop()
+    print("終了しました。")
 
 
 if __name__ == "__main__":
-    task_error_test()
+    main()

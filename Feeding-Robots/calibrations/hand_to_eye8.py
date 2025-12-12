@@ -9,7 +9,7 @@ import time
 # 1. カメラ設定（Aruco）
 # ================================
 ARUCO_DICT = cv2.aruco.DICT_6X6_250
-MARKER_LENGTH = 0.028  # 28mm
+MARKER_LENGTH = 0.01 # 28mm
 
 # RealSense intrinsics（必要なら置き換え）→ダメそうなら内部パラメータもキャリブレーションして算出
 fx, fy = 608.54150390625, 607.1893920898438
@@ -53,8 +53,15 @@ def capture_frame(pipeline):
 # ================================
 def detect_marker_pose(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    aruco_dict = cv2.aruco.Dictionary_get(ARUCO_DICT)
-    params = cv2.aruco.DetectorParameters_create()
+
+    # ✅ ここを修正
+    aruco_dict = cv2.aruco.getPredefinedDictionary(ARUCO_DICT)
+
+    # DetectorParameters_create も新しい書き方だとこう：
+    try:
+        params = cv2.aruco.DetectorParameters()  # 新しめの OpenCV
+    except AttributeError:
+        params = cv2.aruco.DetectorParameters_create()  # 古い OpenCV 互換
 
     corners, ids, _ = cv2.aruco.detectMarkers(gray, aruco_dict, parameters=params)
     if ids is None:
@@ -67,6 +74,7 @@ def detect_marker_pose(image):
     R_mat, _ = cv2.Rodrigues(rvec[0][0])
     t = tvec[0][0]
     return R_mat, t
+
 
 
 # ================================
@@ -119,32 +127,23 @@ def main():
     print("10～20サンプルが推奨です。\n")
 
     robot_poses = [
-        [280, -150, 220, -90, 0, -90],
+        [380, -160, 240, -120, 0, -90],
         [320, -100, 240, -90, 0, -90],
         [360, -50, 260, -90, 0, -90],
-        [400, 0, 220, -90, 0, -90],
+        [400, 0, 220, -100, 0, -90],
         [420, 50, 240, -90, 0, -90],
 
         [280, 100, 260, -90, 0, -90],
-        [320, 80, 280, -90, 0, -90],
-        [360, 60, 220, -90, 0, -90],
+        [320, 80, 280, -90, 20,-90],
+        [360, 60, 220, -90, -20, -90],
         [400, 30, 300, -90, 0, -90],
         [420, -20, 260, -90, 0, -90],
 
         [300, -120, 300, -90, 0, -90],
         [350, -80, 220, -90, 0, -90],
-        [390, 10, 270, -90, 0, -90],
+        [390, 10, 270, -90, 0, -70],
+        [380, 90, 250, -90, 0, -100],
         [330, 40, 230, -90, 0, -90],
-        [380, 90, 250, -90, 0, -90], 
-        [280, 30, 240, -70,  0, -90],
-        [280, 30, 240, -100,  0, -90],
-        [280, 30, 240, -50,  0, -90],
-        [280, 30, 240, -90,  0, -90],
-        [280, 30, 240, -90,  20, -90],
-        [280, 30, 240, -90,  -40, -90],
-        [280, 30, 240, -90,  0, -70],
-        [280, 30, 240, -90,  0, -120],
-        [280, 30, 240, -90,  0, -90],
     ]
 
     A_list = []
@@ -152,10 +151,27 @@ def main():
     prev_Tg = None
     prev_Tm = None
 
-    for poses in robot_poses:
-        key = input("Enter を押すとサンプル撮影 / qで終了 : ")
-        if key == "q":
-            break
+    for i, pose_target in enumerate(robot_poses):
+        print(f"\n--- [{i+1}/{len(robot_poses)}] Moving robot to pose: {pose_target} ---")
+
+        # 1) move robot
+        code = arm.set_position(
+            x=pose_target[0],
+            y=pose_target[1],
+            z=pose_target[2],
+            roll=pose_target[3],
+            pitch=pose_target[4],
+            yaw=pose_target[5],
+            speed=50, 
+            wait=True
+        )
+
+        if code != 0:
+            print(f"⚠ ロボット移動エラー: code={code}")
+            continue
+
+        time.sleep(0.5)  # 安定待ち
+
 
         # ====================
         # Step 1: RealSense 画像
