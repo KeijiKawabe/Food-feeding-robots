@@ -10,11 +10,11 @@ import time
 # =============================
 # --- 手眼キャリブレーションで求めた Base→Camera ---
 T_base_camera = np.array([
-    [ 0.86581087, -0.13502627, -0.48180851, -13.0905596 ],
-    [ 0.49130086,  0.04689409,  0.86972663, -198.188808 ],
-    [-0.09484197, -0.98973171,  0.10693994, -106.769127 ],
-    [ 0.0,         0.0,         0.0,          1.0        ]
-])
+    [ 0.99305,  -0.063844, -0.098874, -0.247438],
+    [-0.117679, -0.552636, -0.825073,  0.124938],
+    [-0.001965,  0.830974, -0.556308,  0.281787],
+    [ 0.0,       0.0,       0.0,       1.0    ]
+], dtype=np.float64)
 
 
 # --- TCP → Marker の位置関係（固定値） ---
@@ -88,6 +88,16 @@ def detect_marker_pose(image):
 
     return rt_to_matrix(R_mat, t)
 
+def invert_transform(T):
+    R = T[:3, :3]
+    t = T[:3, 3]
+    R_inv = R.T              # 回転の逆は転置
+    t_inv = -R_inv @ t       # 並進の変換
+    T_inv = np.eye(4)
+    T_inv[:3, :3] = R_inv
+    T_inv[:3, 3]  = t_inv
+    return T_inv
+
 
 # =============================
 # 誤差評価メイン
@@ -141,8 +151,10 @@ def main():
         # =============================
         # ② Camera 経由の Hand 位置
         # =============================
-        T_base_marker = T_base_camera @ T_marker_camera.inverse()
+        T_base_marker = T_base_camera @ invert_transform(T_marker_camera)
         T_base_hand_est = T_base_marker @ T_gripper_marker
+        print(T_base_camera)
+        print(T_marker_camera)
 
 
 

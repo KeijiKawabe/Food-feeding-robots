@@ -48,9 +48,9 @@ XARM_IP = "192.168.1.199"
 
 # Plate centers (RealSense image pixel coordinates)
 PLATE_CENTERS = {
-    "Plate1": (421, 309),
-    "Plate2": (293, 321),
-    "Plate3": (378, 378),
+    "Plate1": (367, 310.5),
+    "Plate2": (238, 329),
+    "Plate3": (321, 384),
 }
 
 # Thermal zone per Plate (Fixed)
@@ -84,20 +84,25 @@ TRAJ_TO_MOUTH = os.path.join(TRAJ_DIR, "to_mouth.traj")
 def build_manual_clip_prompts():
     """CLIP text prompts for the 3 food types."""
     return {
-        "Yogurt": [
-            "a bowl of white yogurt",
-            "plain yogurt on a white plate",
-            "creamy white yogurt food"
+        "Strawberry Yogurt" :[
+            "a bowl of yogurt with strawberry sauce",
+            "creamy yogurt with red fruit sauce",
+           "white yogurt mixed with strawberry jam",
         ],
-        "curry": [
-            "Japanese brown curry",
-            "a dish of rice with curry sauce",
-            "brown curry food"
+        "curry source":[
+            "thick brown curry sauce"
+            "Japanese curry roux sauce"
+            "brown curry gravy"
+            "curry sauce without rice"
         ],
-        "okayuu": [
-            "Japanese rice porridge",
-            "a bowl of rice porridge",
-            "okayuu food"
+        # "okayuu": [
+        #     "Japanese rice porridge",
+        #     "a bowl of rice porridge",
+        #     "okayuu food"
+        # ]
+        "potato salad":[
+           " potato salad with potatoes and mayonnaise",
+           " potato salad with carrots",
         ]
     }
 
@@ -204,24 +209,42 @@ def main():
         rgb_results = pipe.process_frame_multi(color)
         # ※ ここは PerceptionPipeline の format に合わせて実装済み前提
         #   返り値例： [{"label": "Yogurt", "center_px": (x,y), ...}, ...]
+        crop_dir = "debug_crops"
+        os.makedirs(crop_dir, exist_ok=True)
+
+        timestamp = int(time.time())
+
+        for i, item in enumerate(rgb_results):
+            crop = item.get("crop")
+            label = item.get("label", "unknown")
+
+            if crop is not None:
+                out_path = os.path.join(crop_dir, f"crop_{timestamp}_{i}_{label}.png")
+                cv2.imwrite(out_path, cv2.cvtColor(crop, cv2.COLOR_RGB2BGR))
+                print(f"[DEBUG] Saved crop: {out_path}")
 
         for item in rgb_results:
             label = item["label"]
             cx, cy = item["center_px"]
 
             pid, dist = assign_plate((cx, cy))
-
+            score = item.get("score", item.get("prob", 0.0))
             prev = plate_info[pid]
             if (prev["food_label"] is None) or (dist < prev.get("dist", 1e9)):
                 plate_info[pid] = {
                     "food_label": label,
                     "center_px": (cx, cy),
                     "dist": dist,
+                    "score": score,
                 }
 
         print("\n--- Plate Info after RGB ---")
         for pid, info in plate_info.items():
-            print(pid, info)
+            if info["food_label"] is not None:
+                # フォーマットして見やすく表示
+                print(f"{pid}: {info['food_label']} (Score: {info['score']:.4f}, Dist: {info['dist']:.1f})")
+            else:
+                print(f"{pid}: None")
 
         # RGB でなにも検出できないとき
         if all(info["food_label"] is None for info in plate_info.values()):
@@ -275,8 +298,7 @@ def main():
         traj = TRAJ_MAP[pid]
         Robotcontroller.play_traj_file(
             arm=arm,
-            traj_scoop_path=traj,
-            traj_to_mouth_path=TRAJ_TO_MOUTH,
+            traj_path=TRAJ_TO_MOUTH,
         )
 
         # ===== STEP6: Update eat_history =====

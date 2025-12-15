@@ -17,7 +17,7 @@ from src.utils.misc import draw_mask_on_image
 def main():
     # --- テスト用画像パス ---
     # 例: feeding-robots/data/test_image.jpg
-    IMG = os.path.join(ROOT, "..", "data", "test_image.jpg")
+    IMG = os.path.join(ROOT, "..", "data", "output.jpg")
 
     # --- SAM2 の設定ファイル/重みのパス ---
     CFG = os.path.join(

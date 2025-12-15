@@ -125,66 +125,261 @@ class PerceptionPipeline:
     # --------------------------------------------------
     # メイン処理
     # --------------------------------------------------
-
     def process_frame_multi(self, image_bgr):
         """
-        SAM2 + CLIP により、画像中の全 food candidate を返す関数。
-
-        出力例:
-        [
-            {"label": "Yogurt", "bbox": [...], "center_px": (cx, cy), "score": 22.4},
-            {"label": "curry",  "bbox": [...], "center_px": (cx, cy), "score": 21.0},
-            ...
-        ]
+        ROI限定 Segment Everything + CLIP により food candidate を検出。
+        デバッグ用に SAM2 の全 mask / overlay / summary を保存する。
         """
+
+        import os
+        import time
+        import numpy as np
+        import cv2
 
         results = []
 
-        # ---------- 1) SAM2 mask generation ----------
-        masks = self.sam.generate_masks(image_bgr)
+        # ============================
+        # 0) ROI 設定
+        # ============================
+        ROI_X1, ROI_X2 = 120, 480
+        ROI_Y1, ROI_Y2 = 200, 480
 
-
-        # masks は list[dict] 形式を想定（mask, bbox, score など）
-
-        if masks is None or len(masks) == 0:
-            print("⚠ SAM2 returned no masks")
+        roi_img = image_bgr[ROI_Y1:ROI_Y2, ROI_X1:ROI_X2]
+        if roi_img.size == 0:
+            print("⚠ ROI image is empty")
             return results
 
-        # ---------- 2) Each mask → CLIP scoring ----------
-        for idx, m in enumerate(masks):
-            bbox = m["bbox"]  # (x0, y0, x1, y1)
-            x0, y0, x1, y1 = map(int, bbox)
-            crop = image_bgr[y0:y1, x0:x1]
+        # ============================
+        # 1) デバッグフォルダ準備
+        # ============================
+        DEBUG_ROOT = "debug_sam2"
+        os.makedirs(DEBUG_ROOT, exist_ok=True)
 
-            if crop.size == 0:
+        frame_id = int(time.time() * 1000)
+        frame_dir = os.path.join(DEBUG_ROOT, f"frame_{frame_id}")
+        os.makedirs(frame_dir, exist_ok=True)
+
+        # 保存：元画像 & ROI
+        cv2.imwrite(os.path.join(frame_dir, "rgb.png"), image_bgr)
+        cv2.imwrite(os.path.join(frame_dir, "roi.png"), roi_img)
+
+        # 可視化用（元画像）
+        vis_img = image_bgr.copy()
+
+        # ROI 枠を描画（参考用）
+        cv2.rectangle(
+            vis_img,
+            (ROI_X1, ROI_Y1),
+            (ROI_X2, ROI_Y2),
+            (255, 0, 0),
+            2
+        )
+
+        # ============================
+        # 2) SAM2: ROI で Segment Everything
+        # ============================
+        masks = self.sam.generate_masks(roi_img)
+
+        if masks is None or len(masks) == 0:
+            print("⚠ SAM2 returned no masks (ROI)")
+            return results
+
+        print(f"[SAM2] ROI mask count: {len(masks)}")
+
+        # ============================
+        # 3) 各 mask 処理
+        # ============================
+        for idx, m in enumerate(masks):
+
+            # ---------- mask 取得 ----------
+            mask = m.get("segmentation", None)
+            if mask is None:
+                print(f"[SKIP] idx={idx} mask is None keys={list(m.keys())}")
                 continue
 
-            # CLIP scoring (returns dict: {"Yogurt": score, "curry": score, ...})
+            # ---------- mask 保存（ROI座標） ----------
+            mask_u8 = (mask.astype(np.uint8) * 255)
+            cv2.imwrite(
+                os.path.join(frame_dir, f"mask_{idx:02d}.png"),
+                mask_u8
+            )
+
+            overlay = roi_img.copy()
+            overlay[mask] = [0, 0, 255]
+            cv2.imwrite(
+                os.path.join(frame_dir, f"mask_{idx:02d}_overlay.png"),
+                overlay
+            )
+
+            # ---------- bbox（ROI座標） ----------
+            # ---------- bboxをsegmentationから再計算（ROI座標） ----------
+            ys, xs = np.where(mask)
+            if xs.size == 0 or ys.size == 0:
+                print(f"[SKIP] idx={idx} empty segmentation")
+                continue
+
+            x0 = int(xs.min())
+            x1 = int(xs.max()) + 1   # +1 重要（スライスで幅0を防ぐ）
+            y0 = int(ys.min())
+            y1 = int(ys.max()) + 1
+
+            # 念のためROI範囲にクリップ
+            h, w = roi_img.shape[:2]
+            x0 = max(0, min(x0, w-1))
+            x1 = max(0, min(x1, w))
+            y0 = max(0, min(y0, h-1))
+            y1 = max(0, min(y1, h))
+
+            # ここで初めてcrop
+            crop = roi_img[y0:y1, x0:x1]
+            if crop.size == 0:
+                print(f"[SKIP] idx={idx} empty crop after recompute bbox: {(x0,y0,x1,y1)}")
+                continue
+
+
+            # ---------- CLIP ----------
             score_dict = self.clip.score_single(crop)
             if score_dict is None:
+                print(f"[SKIP] idx={idx} CLIP returned None")
                 continue
 
-            # best label
             best_label = max(score_dict, key=score_dict.get)
             best_score = score_dict[best_label]
 
-            # center of bbox
-            cx = (x0 + x1) / 2
-            cy = (y0 + y1) / 2
+            # ---------- 座標を元画像に戻す ----------
+            gx0 = x0 + ROI_X1
+            gy0 = y0 + ROI_Y1
+            gx1 = x1 + ROI_X1
+            gy1 = y1 + ROI_Y1
+
+            cx = int((gx0 + gx1) / 2)
+            cy = int((gy0 + gy1) / 2)
+
+            # ---------- summary 可視化 ----------
+            cv2.rectangle(vis_img, (gx0, gy0), (gx1, gy1), (0, 255, 0), 2)
+            cv2.circle(vis_img, (cx, cy), 4, (0, 0, 255), -1)
+
+            text = f"{best_label} ({best_score:.2f})"
+            cv2.putText(
+                vis_img,
+                text,
+                (gx0, max(gy0 - 5, 15)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA
+            )
 
             results.append({
                 "label": best_label,
                 "score": float(best_score),
-                "bbox": bbox,
+                "clip_scores": score_dict,
+                "bbox": (gx0, gy0, gx1, gy1),
                 "center_px": (cx, cy),
+                "crop": crop
             })
 
-        # ---------- 3) DEBUG: show recognized instances ----------
-        print("\n=== Multi-food detection result ===")
+        # ============================
+        # 4) summary 保存
+        # ============================
+        cv2.imwrite(os.path.join(frame_dir, "summary.png"), vis_img)
+        print(f"🖼 Saved SAM2 ROI debug images to: {os.path.abspath(frame_dir)}")
+
+        # ============================
+        # 5) console log
+        # ============================
+        print("\n=== Multi-food detection result (ROI) ===")
         for r in results:
-            print(f"Label={r['label']} score={r['score']:.2f} center={r['center_px']}")
+            print(
+                f"Label={r['label']} "
+                f"score={r['score']:.2f} "
+                f"center={r['center_px']}"
+            )
 
         return results
+
+
+    # def process_frame_multi(self, image_bgr):
+    #     """
+    #     SAM2 + CLIP により、画像中の全 food candidate を返す関数。
+
+    #     出力例:
+    #     [
+    #         {"label": "Yogurt", "bbox": [...], "center_px": (cx, cy), "score": 22.4},
+    #         {"label": "curry",  "bbox": [...], "center_px": (cx, cy), "score": 21.0},
+    #         ...
+    #     ]
+    #     """
+
+    #     results = []
+    #     vis_img = image_bgr.copy()
+
+    #     # ---------- 1) SAM2 mask generation ----------
+    #     masks = self.sam.generate_masks(image_bgr)
+
+
+    #     # masks は list[dict] 形式を想定（mask, bbox, score など）
+
+    #     if masks is None or len(masks) == 0:
+    #         print("⚠ SAM2 returned no masks")
+    #         return results
+
+    #     # ---------- 2) Each mask → CLIP scoring ----------
+    #     for idx, m in enumerate(masks):
+    #         bbox = m["bbox"]  # (x0, y0, x1, y1)
+    #         x0, y0, x1, y1 = map(int, bbox)
+    #         crop = image_bgr[y0:y1, x0:x1]
+
+    #         if crop.size == 0:
+    #             continue
+
+    #         # CLIP scoring (returns dict: {"Yogurt": score, "curry": score, ...})
+    #         score_dict = self.clip.score_single(crop)
+    #         if score_dict is None:
+    #             continue
+
+    #         # best label
+    #         best_label = max(score_dict, key=score_dict.get)
+    #         best_score = score_dict[best_label]
+
+    #         # center of bbox
+    #         cx = int((x0 + x1)/2)
+    #         cy = int((y0 + y1)/2)
+    #                 # ===== 可視化 =====
+    #         color = (0, 255, 0)  # bbox: green
+    #         cv2.rectangle(vis_img, (x0, y0), (x1, y1), color, 2)
+    #         cv2.circle(vis_img, (cx, cy), 4, (0, 0, 255), -1)
+    #         text = f"{best_label} ({best_score:.2f})"
+    #         cv2.putText(
+    #             vis_img,
+    #             text,
+    #             (x0, max(y0 - 5, 15)),
+    #             cv2.FONT_HERSHEY_SIMPLEX,
+    #             0.45,
+    #             (255, 255, 255),
+    #             2,
+    #             cv2.LINE_AA
+    #         )
+
+    #         results.append({
+    #             "label": best_label,
+    #             "score": float(best_score),
+    #             "clip scores": score_dict,
+    #             "bbox": bbox,
+    #             "center_px": (cx, cy),
+    #         })
+    #         ts = int(time.time() * 1000)
+    #         out_path = f"debug_multi_food_{ts}.png"
+    #         cv2.imwrite(out_path, vis_img)
+    #         print(f"🖼 Saved detection visualization: {out_path}")
+
+    #     # ---------- 3) DEBUG: show recognized instances ----------
+    #     print("\n=== Multi-food detection result ===")
+    #     for r in results:
+    #         print(f"Label={r['label']} score={r['score']:.2f} center={r['center_px']}")
+
+    #     return results
 
     def process_frame(
         self,

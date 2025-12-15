@@ -101,6 +101,54 @@ def main():
         print("⚠ マスクが1つも生成されませんでした")
         return
 
+    # ==========================================
+    # 追加: すべてのマスク画像を保存・出力する
+    # ==========================================
+    # 保存用のディレクトリを作成
+    save_dir = "sam2_all_masks"
+    os.makedirs(save_dir, exist_ok=True)
+    print(f"全マスク画像を '{save_dir}' ディレクトリに保存します...")
+
+    # 全マスクの位置関係を確認するための「まとめ画像」を用意
+    vis_all_masks = image_bgr.copy()
+
+    for i, mask_u8 in enumerate(masks_bin):
+        # --- 1. マスクで切り抜いた画像（対象物以外を黒にする）を保存 ---
+        # image_bgr と mask (0 or 1) を AND演算
+        masked_img = cv2.bitwise_and(image_bgr, image_bgr, mask=mask_u8)
+        
+        # ファイル名に番号をつけて保存 (例: mask_005_cutout.png)
+        filename_cutout = os.path.join(save_dir, f"mask_{i:03d}_cutout.png")
+        cv2.imwrite(filename_cutout, masked_img)
+
+        # --- 2. (任意) 白黒のバイナリマスク自体も保存したい場合 ---
+        # filename_bin = os.path.join(save_dir, f"mask_{i:03d}_binary.png")
+        # cv2.imwrite(filename_bin, mask_u8 * 255)
+
+        # --- 3. まとめ画像用に輪郭を描画 ---
+        # ランダムな色を生成 (B, G, R)
+        color = np.random.randint(0, 255, 3).tolist()
+        
+        # 輪郭を検出して描画
+        contours, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(vis_all_masks, contours, -1, color, 2)
+        
+        # マスクの中心に番号(ID)を書く（どの画像が何番か分かるように）
+        M = cv2.moments(mask_u8)
+        if M["m00"] != 0:
+            cx_m = int(M["m10"] / M["m00"])
+            cy_m = int(M["m01"] / M["m00"])
+            # 文字が見えやすいように白文字＋黒縁取り
+            cv2.putText(vis_all_masks, str(i), (cx_m, cy_m), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 3)
+            cv2.putText(vis_all_masks, str(i), (cx_m, cy_m), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 1)
+
+    # 全マスクの輪郭とIDが入った一覧画像を保存
+    cv2.imwrite(os.path.join(save_dir, "all_masks_index.png"), vis_all_masks)
+    print("保存完了")
+
+    # ==========================================
+    # (ここまで追加)
+    # ==========================================
     # =========================
     # 3) CLIP で「皿っぽいマスク」を選ぶ
     # =========================

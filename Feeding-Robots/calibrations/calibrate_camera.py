@@ -5,8 +5,8 @@ import pyrealsense2 as rs
 # ============================================
 # 1. チェッカーボード設定
 # ============================================
-CHECKERBOARD = (9, 6)  # コーナー数
-SQUARE_SIZE = 0.025    # 25mm = 0.025m
+CHECKERBOARD = (11, 7)
+SQUARE_SIZE = 0.03   # 25mm = 0.025m
 
 objp = np.zeros((CHECKERBOARD[0] * CHECKERBOARD[1], 3), np.float32)
 objp[:, :2] = np.mgrid[0:CHECKERBOARD[0], 0:CHECKERBOARD[1]].T.reshape(-1, 2)
@@ -55,7 +55,7 @@ try:
             break
 
         # --- Enter キーで保存 ---
-        if key == 13:  # ENTER
+        if key == 13:
             if ret:
                 print("[OK] 保存しました")
                 objpoints.append(objp)

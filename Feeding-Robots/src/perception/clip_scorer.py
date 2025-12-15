@@ -23,7 +23,12 @@ class ClipScorer:
         self.use_image_amp = (self.device == "cuda" and use_fp16)
 
         self.prompts = prompts or {
-            "rice": ["a photo of rice"],
+        "curry source":[
+            "thick brown curry sauce"
+            "Japanese curry roux sauce"
+            "brown curry gravy"
+            "curry sauce without rice"
+            ],
             "non_food": ["empty plate"]
         }
         self.text_feat = self._encode_prompts(self.prompts)

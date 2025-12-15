@@ -226,14 +226,15 @@ def main():
     thermal_cam = ThermalGPTSystem(api_key)
 
     # ====== STEP 1: GPT で CLIP プロンプト生成（1回） ======
-    frames = rs_pipeline.wait_for_frames()
-    aligned = align.process(frames)
-    init_color = np.asanyarray(aligned.get_color_frame().get_data())
+    # frames = rs_pipeline.wait_for_frames()
+    # aligned = align.process(frames)
+    # init_color = np.asanyarray(aligned.get_color_frame().get_data())
 
-    print("\n→ Generating CLIP prompts via GPT...")
-    clip_prompts = build_clip_prompts_with_gpt(client, init_color)
+    # print("\n→ Generating CLIP prompts via GPT...")
+    # clip_prompts = build_clip_prompts_with_gpt(client, init_color)
+    # print("CLIP PROMPTS:", clip_prompts)
+    clip_prompts = build_manual_clip_prompts()
     print("CLIP PROMPTS:", clip_prompts)
-
     # PerceptionPipeline
     pipe = PerceptionPipeline(
         sam2_cfg=SAM2_CFG,
@@ -253,9 +254,53 @@ def main():
             break
 
         # ====== STEP 2: RGB Capture ======
-        frames = rs_pipeline.wait_for_frames()
-        aligned = align.process(frames)
-        color = np.asanyarray(aligned.get_color_frame().get_data())
+        # ====== STEP 2: RGB 認識 (SAM2 + CLIP) ======
+
+        plate_info = {
+            "Plate1": {"food_label": None, "center_px": None},
+            "Plate2": {"food_label": None, "center_px": None},
+            "Plate3": {"food_label": None, "center_px": None},
+        }
+
+        for plate_id, (y1, y2, x1, x2) in PLATE_RGB_ZONES.items():
+            crop = color[y1:y2, x1:x2]
+            if crop.size == 0:
+                print(f"[RGB] {plate_id}: crop empty")
+                continue
+
+            rgb_out = pipe.process_frame(crop)
+
+            label = rgb_out.get("label")
+            center_local = rgb_out.get("center_px")  # crop 内の座標 (cx, cy)
+
+            if label is None or center_local is None:
+                print(f"[RGB] {plate_id}: no food detected")
+                continue
+
+            # --- crop 内の中心 → 画像全体の座標に変換 ---
+            cx_global = center_local[0] + x1
+            cy_global = center_local[1] + y1
+            center_global = (cx_global, cy_global)
+
+            # --- 皿中心との距離で nearest plate を決定 ---
+            assigned_plate, dist = assign_plate_id(center_global)
+
+            print(f"[RGB] base {plate_id}: detected {label} at {center_global} → nearest={assigned_plate}, dist={dist:.1f}")
+
+            # すでに何か入っている plate に別の結果が被った場合は、
+            # 「距離が短い方を採用する」というロジックにしておくと少し頑丈
+            current = plate_info.get(assigned_plate, {})
+            if current.get("food_label") is None or dist < current.get("dist", 1e9):
+                plate_info[assigned_plate] = {
+                    "food_label": label,
+                    "center_px": center_global,
+                    "dist": dist,
+                }
+
+        print("\n[Plate Info after RGB]")
+        for pid, info in plate_info.items():
+            print(f"  {pid}: {info}")
+
 
         # ====== STEP 3: Plate1〜3 を SAM2+CLIP で認識 ======
         # --- RGB 認識（全体画像に対して1回だけ） ---
