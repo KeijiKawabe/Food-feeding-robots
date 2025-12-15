@@ -56,6 +56,7 @@ def capture_frame(pipeline):
 # =============================
 # ArUco Pose Detection
 # =============================
+# 返り値: 4x4 行列 (Marker -> Camera)
 def detect_marker_pose(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
@@ -116,8 +117,8 @@ def main():
 
         # --- カメラで Marker 取得 ---
         img = capture_frame(pipeline)
-        T_camera_marker = detect_marker_pose(img)
-        if T_camera_marker is None:
+        T_marker_camera = detect_marker_pose(img)
+        if T_marker_camera is None:
             print("❌ マーカー未検出")
             continue
 
@@ -140,7 +141,7 @@ def main():
         # =============================
         # ② Camera 経由の Hand 位置
         # =============================
-        T_base_marker = T_base_camera @ T_camera_marker
+        T_base_marker = T_base_camera @ T_marker_camera.inverse()
         T_base_hand_est = T_base_marker @ T_gripper_marker
 
 

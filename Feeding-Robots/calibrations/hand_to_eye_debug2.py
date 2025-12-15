@@ -11,7 +11,7 @@ import time
 ARUCO_DICT = cv2.aruco.DICT_6X6_250
 MARKER_LENGTH = 0.076# 単位: メートル (10mm)
 
-# RealSense intrinsics
+# RealSense intrinsics（公式から得た値を使用）
 fx, fy = 608.54150390625, 607.1893920898438
 cx, cy = 309.4483947753906, 264.0105285644531
 camera_matrix = np.array([[fx, 0, cx],
@@ -20,7 +20,7 @@ camera_matrix = np.array([[fx, 0, cx],
 dist_coeffs = np.zeros(5, dtype=np.float32)
 
 # ================================
-# 2. ユーティリティ
+# 2. ユーティリティ(回転行列と座標行列を結合)
 # ================================
 def rt_to_matrix(R_mat, tvec):
     T = np.eye(4)
@@ -29,14 +29,14 @@ def rt_to_matrix(R_mat, tvec):
     return T
 
 # ================================
-# 3. RealSense・ArUco処理
+# 3. RealSense・ArUco処理（カメラとマーカーの処理）
 # ================================
 def capture_frame(pipeline):
     frames = pipeline.wait_for_frames()
     color_frame = frames.get_color_frame()
     img = np.asanyarray(color_frame.get_data())
     return img
-
+#　カメラ座標系に対するマーカーの位置と回転を算出、Marker -> Camera
 def detect_marker_pose(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     aruco_dict = cv2.aruco.getPredefinedDictionary(ARUCO_DICT)
@@ -62,13 +62,13 @@ def detect_marker_pose(image):
 # 4. メイン処理
 # ================================
 def main():
-    # --- RealSense ---
+    # --- RealSenseの起動 ---
     pipeline = rs.pipeline()
     config = rs.config()
     config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
     pipeline.start(config)
 
-    # --- xArm ---
+    # --- xArmの起動 ---
     # IPアドレスは環境に合わせて変更してください
     arm = XArmAPI("192.168.1.199")
     arm.motion_enable(True)
@@ -82,8 +82,8 @@ def main():
 
     # OpenCV calibrateHandEye に渡すためのリスト
     # Base -> Gripper
-    R_gripper2base_list = []
-    t_gripper2base_list = []
+    R_base2gripper_list = []
+    t_base2gripper_list = []
     # Target(Marker) -> Camera (OpenCVの仕様上、Camera->MarkerではなくTarget->Camの形式で扱う場合があるが、
     # calibrateHandEyeは通常 Camera coord での Marker pose を入力する)
     R_target2cam_list = []
@@ -120,9 +120,10 @@ def main():
         if code != 0:
             print("❌ ロボット通信エラー")
             continue
-            
+        # Ufactory Studioと同じようにTCPの座標が出る    
         x_mm, y_mm, z_mm, roll_deg, pitch_deg, yaw_deg = pose
-        
+        print("Gripper Pose (Base->Gripper):")
+        print(pose)        
         # mm -> m 変換
         t_g = np.array([x_mm/1000.0, y_mm/1000.0, z_mm/1000.0])
         # degree -> Rotation Matrix
@@ -132,12 +133,12 @@ def main():
         print(f"  Marker(m): {tm}")
 
         # リストに追加 (絶対姿勢をそのまま保存)
-        R_gripper2base_list.append(R_g)
-        t_gripper2base_list.append(t_g)
+        R_base2gripper_list.append(R_g)
+        t_base2gripper_list.append(t_g)
         
-# Camera->Target の逆 = Target->Camera
-        R_t2c = Rm.T
-        t_t2c = -Rm.T @ tm
+        # 3. マーカー姿勢取得 (Target -> Camera)
+        R_t2c = Rm
+        t_t2c = tm
 
         R_target2cam_list.append(R_t2c)
         t_target2cam_list.append(t_t2c)
@@ -161,8 +162,8 @@ def main():
     
     try:
         R_cam, t_cam = cv2.calibrateHandEye(
-            R_gripper2base_list,
-            t_gripper2base_list,
+            R_base2gripper_list,
+            t_base2gripper_list,
             R_target2cam_list,
             t_target2cam_list,
             method=cv2.CALIB_HAND_EYE_TSAI
@@ -196,7 +197,7 @@ def main():
     print("取得した最後のデータを使って検証します。")
     
     # 最後のデータ
-    T_base_gripper = rt_to_matrix(R_gripper2base_list[-1], t_gripper2base_list[-1])
+    T_base_gripper = rt_to_matrix(R_base2gripper_list[-1], t_base2gripper_list[-1])
     T_camera_marker = rt_to_matrix(R_target2cam_list[-1], t_target2cam_list[-1])
     
     # 計算上のマーカー位置 (Base座標系)
