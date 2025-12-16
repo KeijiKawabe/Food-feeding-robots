@@ -85,8 +85,8 @@ def build_manual_clip_prompts():
     """CLIP text prompts for the 3 food types."""
     return {
         "Strawberry Yogurt" :[
-            "a bowl of yogurt with strawberry sauce",
-            "creamy yogurt with red fruit sauce",
+            "a bowl of yogurt with strawberry jam",
+            "creamy yogurt with red fruit jam",
            "white yogurt mixed with strawberry jam",
         ],
         "curry source":[
@@ -298,7 +298,7 @@ def main():
         traj = TRAJ_MAP[pid]
         Robotcontroller.play_traj_file(
             arm=arm,
-            traj_path=TRAJ_TO_MOUTH,
+            traj_path= traj,
         )
 
         # ===== STEP6: Update eat_history =====

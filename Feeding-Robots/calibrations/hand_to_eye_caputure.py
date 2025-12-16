@@ -111,14 +111,14 @@ def main():
         key = 0
         if Rm is not None:
             cv2.drawFrameAxes(display_img, camera_matrix, dist_coeffs, 
-                              np.array([cv2.Rodrigues(Rm)[0]]), tm, MARKER_LENGTH * 2)
+                              np.array([cv2.Rodrigues(Rm)[0]]), tm, MARKER_LENGTH * 0.3)
             cv2.imshow("Frame", display_img)
-            key = cv2.waitKey(10)
+            key = cv2.waitKey(10) & 0xFF
         else:
             # マーカーが見つからない場合
             cv2.putText(display_img, "Marker Not Found", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             cv2.imshow("Frame", display_img)
-            key = cv2.waitKey(10)
+            key = cv2.waitKey(10) & 0xFF
             if key == ord('q'):
                 break
             continue

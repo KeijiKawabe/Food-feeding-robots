@@ -38,7 +38,7 @@ from src.pipeline import PerceptionPipeline
 from src.thermal.thermal_gpt_system import ThermalGPTSystem
 from src.utils.misc import draw_mask_on_image
 # TaskPlanner を使うなら import
-# from src.planner.task_planner import TaskPlanner
+from src.planner.task_planner import TaskPlanner
 
 
 # ==============================
@@ -49,7 +49,7 @@ from src.utils.misc import draw_mask_on_image
 XARM_IP = "192.168.1.199"
 
 # キャリブレーション JSON ファイルのパス
-CALIB_PATH = os.path.join(PROJECT_ROOT, "calibration", "calib_config.json")
+CALIB_PATH = os.path.join(PROJECT_ROOT, "calibrations", "calib_config.json")
 # 例として以下のキーを期待:
 # {
 #   "K_color": [[fx, 0, cx],[0, fy, cy],[0,0,1]],
@@ -83,7 +83,7 @@ def load_calibration(path: str) -> Dict[str, Any]:
     キャリブレーション結果を JSON から読み込む。
     形式は好きに決めて良いが、ここでは例として:
         - "K_color"           : RealSense カラーの内部パラメータ (3x3)
-        - "T_base_realsense"  : Base←RealSense の 4x4 行列
+        - "T_realsense_base"  : Base←RealSense の 4x4 行列
         - "T_realsense_thermal": Thermal←RealSense の 4x4 行列
     などを想定。
     """
@@ -96,8 +96,8 @@ def load_calibration(path: str) -> Dict[str, Any]:
     # numpy 配列に変換しておく
     if "K_color" in data:
         data["K_color"] = np.asarray(data["K_color"], dtype=np.float32)
-    if "T_base_realsense" in data:
-        data["T_base_realsense"] = np.asarray(data["T_base_realsense"], dtype=np.float32)
+    if "T_realsense_base" in data:
+        data["T_realsense_base"] = np.asarray(data["T_realsense_base"], dtype=np.float32)
     if "T_realsense_thermal" in data:
         data["T_realsense_thermal"] = np.asarray(data["T_realsense_thermal"], dtype=np.float32)
 
@@ -145,6 +145,16 @@ def init_realsense() -> rs.pipeline:
     print("✓ RealSense スタート")
     return pipeline
 
+def CheckIfNewPositionInWorkspace(x,y,z):
+    if x > 500  or x < 300:
+        return False
+    if y < -200 or y > 100:
+        return False
+    if z < 94 or z > 400:
+        return False
+    return True
+
+
 
 def build_manual_clip_prompts() -> Dict[str, Any]:
     """
@@ -152,10 +162,17 @@ def build_manual_clip_prompts() -> Dict[str, Any]:
     必要に応じてここを編集すればよい。
     """
     return {
-        "rice": ["a plate of white rice", "cooked white rice"],
-        "curry": ["a plate of curry", "a bowl of curry"],
-        "salad": ["a bowl of salad", "vegetable salad"],
-        "soup": ["a bowl of soup"],
+        "Strawberry Yogurt" :[
+            "a bowl of yogurt with strawberry jam",
+            "creamy yogurt with red fruit jam",
+           "white yogurt mixed with strawberry jam",
+        ],
+        "curry source":[
+            "thick brown curry sauce"
+            "Japanese curry roux sauce"
+            "brown curry gravy"
+            "curry sauce without rice"
+        ],
     }
 
 
@@ -228,7 +245,7 @@ def compute_bbox_center_depth_to_base(
 
     前提:
         K_color: 3x3 の内パラ
-        T_base_realsense: 4x4, Base ← RealSense
+        T_realsense_base: 4x4, Base ← RealSense
 
     戻り値:
         np.array([x, y, z])  (単位: m)
@@ -237,10 +254,10 @@ def compute_bbox_center_depth_to_base(
         return None
 
     K = calib.get("K_color", None)
-    T_br = calib.get("T_base_realsense", None)  # Base ← RealSense
+    T_rb = calib.get("T_realsense_base", None)  # Base ← RealSense
 
-    if K is None or T_br is None:
-        print("⚠ calib に K_color / T_base_realsense がありません。")
+    if K is None or T_rb is None:
+        print("⚠ calib に K_color / T_realsense_base がありません。")
         return None
 
     fx = K[0, 0]
@@ -257,7 +274,7 @@ def compute_bbox_center_depth_to_base(
     P_cam = np.array([X, Y, Z, 1.0], dtype=np.float32)
 
     # Base 座標系へ
-    P_base = T_br @ P_cam
+    P_base = T_rb @ P_cam
     return P_base[:3]
 
 
@@ -379,23 +396,53 @@ def move_robot_to_food(
     print("  ※ ここで pixel + depth → Base 座標に変換して xArm を動かす")
     print("====================================")
 
+
     # --- TODO: 実際のロボット動作をここに実装する ---
     # 例:
-    # if P_base is not None:
-    #     # mm 単位に変換
-    #     x_mm, y_mm, z_mm = x_b * 1000, y_b * 1000, z_b * 1000
-    #
-    #     # アプローチ姿勢
-    #     arm.set_position(
-    #         x_mm, y_mm, z_mm + 50,   # 5cm 上から
-    #         roll=0, pitch=0, yaw=0,
-    #         speed=100, mvacc=1000,
-    #         wait=True
-    #     )
-    #
+    if P_base is not None:
+        # mm 単位に変換
+        x_mm, y_mm, z_mm = x_b * 1000 - 240, y_b * 1000, 220
+        CheckIfNewPositionInWorkspace(x_mm, y_mm, z_mm + 50)
+        # アプローチ姿勢
+        arm.set_position(
+            x_mm, y_mm, z_mm + 50,   # 5cm 上から
+            roll=-135, pitch=0, yaw=-90,
+            speed=50, mvacc=1000,
+            wait=True
+        )
+        CheckIfNewPositionInWorkspace(x_mm, y_mm, z_mm)
+        arm.set_position(
+            x_mm, y_mm, z_mm,   # 5cm 上から
+            roll=-135, pitch=0, yaw=-90,
+            speed=50, mvacc=1000,
+            wait=True
+        )
+        CheckIfNewPositionInWorkspace(x_mm + 80, y_mm, z_mm)
+        arm.set_position(
+            x_mm + 80, y_mm, z_mm,   # 5cm 上から
+            roll=-135, pitch=0, yaw=-90,
+            speed=50, mvacc=1000,
+            wait=True
+        )
+        CheckIfNewPositionInWorkspace(x_mm + 80, y_mm, z_mm)
+        arm.set_position(
+            x_mm + 80, y_mm, z_mm,   # 5cm 上から
+            roll=-90, pitch=0, yaw=-90,
+            speed=50, mvacc=1000,
+            wait=True
+        )
+
+
+    
     #     # 掬い動作など…
     #
     # -------------------------------------------------
+
+def move_food_to_mouth(arm:XArmAPI):
+    arm.set_position(430, 20, 300, -90, 0, -90)
+    return
+
+
 
 
 # ==============================
@@ -486,11 +533,21 @@ def main():
 
             # --- RGB パイプライン (SAM2 + CLIP + Depth) ---
             rgb_out = pipe.process_frame(color_image, depth_frame=depth_image)
-            label = rgb_out.get("label")
-            bbox = rgb_out.get("bbox")
-            center_px = rgb_out.get("center_px")
-            depth_m = rgb_out.get("depth_m")
+
+            instances = rgb_out.get("instances", {})
             fps = rgb_out.get("fps")
+
+            if not instances:
+                print("⚠ 食材が認識できませんでした。次のループへ。")
+                continue
+
+            # スコア最大の食材を1つ選ぶ
+            label, best = max(instances.items(), key=lambda kv: kv[1]["score"])
+
+            bbox = best["bbox"]
+            center_px = best["center_px"]
+            depth_m = best["depth_m"]
+
 
             print("\n--- RGB Perception ---")
             print("label    :", label)
@@ -561,8 +618,10 @@ def main():
 
             # --- デバッグ用に RGB+マスク+BBox を表示 ---
             vis = color_image.copy()
-            if rgb_out.get("mask") is not None:
-                vis = draw_mask_on_image(vis, rgb_out["mask"])
+            for label, inst in instances.items():
+                if inst.get("mask") is not None:
+                    vis = draw_mask_on_image(vis, inst["mask"])
+
             if bbox is not None:
                 x1, y1, x2, y2 = bbox
                 cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
@@ -571,6 +630,8 @@ def main():
             print("  → ウィンドウに RGB 認識結果を表示しました。何かキーを押すと閉じます。")
             cv2.waitKey(0)
             cv2.destroyAllWindows()
+
+            move_food_to_mouth(arm=arm)
 
     except KeyboardInterrupt:
         print("\n⏹ キーボード割り込みにより終了します。")

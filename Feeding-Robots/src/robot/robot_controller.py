@@ -24,18 +24,7 @@ class Robotcontroller:
 
         return arm
     
-    def play_traj_file(arm: XArmAPI, traj_path: str):
-        """
-        xArm 用の traj ファイルを読み込んで再生する簡易関数。
-
-        ここでは例として、
-        - CSV 形式
-        - ヘッダに joint1, joint2, ..., joint7
-        - 各行に rad 単位の関節角
-
-        を想定している。
-        実際のファイル形式や API 名は、使っている SDK / エクスポート形式に合わせて調整してください。
-        """
+    def play_traj_file(arm: XArmAPI, traj_path: str, is_radian=True):
         if not os.path.exists(traj_path):
             print(f"⚠ traj ファイルが見つかりません: {traj_path}")
             return
@@ -44,25 +33,78 @@ class Robotcontroller:
 
         try:
             with open(traj_path, "r", newline="") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    try:
-                        joints = [float(row[f"joint{i}"]) for i in range(1, 8)]
-                    except KeyError:
-                        print("⚠ CSV の列名が想定と違います。joint1..joint7 を想定しています。")
-                        break
+                reader = csv.reader(f)
+                rows = list(reader)
 
-                    # xArm SDK の関節角コマンド
-                    # 実際の API 名・引数はインストールしている SDK に合わせて調整してください。
-                    # 例: arm.set_servo_angle_j(joints, is_radian=True, wait=True)
-                    code = arm.set_servo_angle(joints, is_radian=True, wait=True)
-                    if code != 0:
-                        print(f"⚠ xArm コマンドエラー: code={code}")
-                        break
+            if len(rows) == 0:
+                print("⚠ traj ファイルが空です")
+                return
+
+            header = rows[0]
+            data_rows = rows[1:]
+
+            # ----------------------------
+            # 1. ヘッダ有りか判定
+            # ----------------------------
+            has_header = any(
+                "joint" in h.lower() or h.lower().startswith("j")
+                for h in header
+            )
+
+            if has_header:
+                # joint列を自動抽出
+                joint_indices = []
+                for i, h in enumerate(header):
+                    hl = h.lower()
+                    if "joint" in hl or hl.startswith("j"):
+                        joint_indices.append((i, h))
+
+                if len(joint_indices) != 7:
+                    print(f"⚠ joint列が7個見つかりません: {[h for _,h in joint_indices]}")
+                    return
+
+                # joint1..7 順に並び替え
+                joint_indices.sort(
+                    key=lambda x: int("".join(filter(str.isdigit, x[1])))
+                )
+
+                indices = [i for i, _ in joint_indices]
+
+            else:
+                # ヘッダ無し（数値のみ）
+                if len(header) < 7:
+                    print(f"⚠ 列数が不足しています: {len(header)} 列")
+                    return
+
+                # ★ 先頭7列を joint とみなす
+                indices = list(range(7))
+                data_rows = rows
+
+            # ----------------------------
+            # 2. 再生
+            # ----------------------------
+            for row in data_rows:
+                joints = [float(row[i]) for i in indices]
+                code = arm.set_servo_angle(
+                    angles=joints,
+                    is_radian=True,
+                    speed=0.5,
+                    mvacc=1.0,
+                    radius=0.0,   # ★ これが決定打
+                    wait=True
+                )
+
+
+
+                if code != 0:
+                    print(f"⚠ xArm コマンドエラー: code={code}")
+                    break
 
             print("[xArm] traj 再生終了")
+
         except Exception as e:
             print("⚠ traj 再生中に例外が発生しました:", e)
+
 
 
     def move_robot_to_food(

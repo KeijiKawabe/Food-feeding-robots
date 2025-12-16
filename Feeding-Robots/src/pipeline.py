@@ -238,7 +238,8 @@ class PerceptionPipeline:
 
 
             # ---------- CLIP ----------
-            score_dict = self.clip.score_single(crop)
+            crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+            score_dict = self.clip.score_single(crop_rgb)
             if score_dict is None:
                 print(f"[SKIP] idx={idx} CLIP returned None")
                 continue
@@ -277,7 +278,7 @@ class PerceptionPipeline:
                 "clip_scores": score_dict,
                 "bbox": (gx0, gy0, gx1, gy1),
                 "center_px": (cx, cy),
-                "crop": crop
+                "crop": crop_rgb
             })
 
         # ============================
@@ -414,6 +415,7 @@ class PerceptionPipeline:
             self.frame_count % self.maskgen_interval == 0
             or self.last["mask"] is None
         )
+        best_per_label = {}  # label -> dict
 
         if need_new_masks:
             # --- SAM2 で「全マスク」を生成 ---
@@ -441,104 +443,154 @@ class PerceptionPipeline:
 
             print("\n--- DEBUG: CLIP crop & score list ---")
 
+        #     for i, crop in enumerate(crops):
+        #         # crop 保存
+        #         crop_path = os.path.join(debug_dir, f"crop_{i:02d}.png")
+        #         cv2.imwrite(crop_path, cv2.cvtColor(crop, cv2.COLOR_RGB2BGR))
+
+        #         # 全ラベルに対するスコアを計算
+        #         score_dict = self.clip.score_single(crop)
+
+        #         print(f"[Crop {i:02d}] {crop_path}")
+        #         for label, score in score_dict.items():
+        #             print(f"    {label:10s} : {score:.4f}")
+
+
+        #     if crops:
+        #         if target_label is None:
+        #             # 従来の方式：CLIPスコア最大採用
+        #             pick = self.clip.pick_best(crops)
+        #         else:
+        #             # ★ 新方式：LLM の next_food でフィルタした中で最大スコア
+        #             pick = self.clip.pick_target(crops, target_label)
+        #         if pick is not None:
+        #             idx = pick["index"]
+        #             cls = pick["cls"]
+        #             score = float(pick["score"])
+        #             bbox = bboxes[idx]
+
+        #             # bbox で SAM2 のマスクを再度 refine してもいいし、
+        #             # 既存の masks[idx] をそのまま使っても良い。
+        #             # ここでは refine して精度を上げる。
+        #             refined_mask = self.sam.predict_by_bbox(bbox)
+
+        #             # bbox 中心ピクセル
+        #             x1, y1, x2, y2 = bbox
+        #             cx = int((x1 + x2) / 2)
+        #             cy = int((y1 + y2) / 2)
+        #             center_px = (cx, cy)
+
+        #             # 深度が使える場合は中心の depth を m で取得
+        #             depth_m = None
+        #             if self.enable_depth and depth_frame is not None:
+        #                 if (
+        #                     depth_frame.shape[0] == H
+        #                     and depth_frame.shape[1] == W
+        #                 ):
+        #                     raw_depth = float(depth_frame[cy, cx])  # mm 想定
+        #                     if raw_depth > 0:
+        #                         depth_m = raw_depth / 1000.0  # m に変換
+        #                 # 解像度が合っていない場合は depth_m は None のまま
+
+        #             self.last.update(
+        #                 mask=refined_mask,
+        #                 bbox=bbox,
+        #                 label=cls,
+        #                 score=score,
+        #                 center_px=center_px,
+        #                 depth_m=depth_m,
+        #             )
+        #         else:
+        #             # CLIP で有力な候補が見つからなかった場合
+        #             self.last.update(
+        #                 mask=None,
+        #                 bbox=None,
+        #                 label=None,
+        #                 score=None,
+        #                 center_px=None,
+        #                 depth_m=None,
+        #             )
+        #     else:
+        #         # 有効マスクが1つもなかった場合
+        #         self.last.update(
+        #             mask=None,
+        #             bbox=None,
+        #             label=None,
+        #             score=None,
+        #             center_px=None,
+        #             depth_m=None,
+        #         )
+
+        # # FPS の計算（指数移動平均）
+        # self.frame_count += 1
+        # dt = max(time.time() - t0, 1e-6)
+        # fps = 1.0 / dt
+        # if self.ema_fps is None:
+        #     self.ema_fps = fps
+        # else:
+        #     self.ema_fps = 0.9 * self.ema_fps + 0.1 * fps
+
+        # # 出力をまとめて返す
+        # return {
+        #     "mask": self.last["mask"],
+        #     "bbox": self.last["bbox"],
+        #     "label": self.last["label"],
+        #     "score": self.last["score"],
+        #     "center_px": self.last["center_px"],
+        #     "depth_m": self.last["depth_m"],
+        #     "fps": self.ema_fps,
+        # }
+                # =============================
+            # CLIP: labelごとに best crop を選ぶ
+            # =============================
+
+
             for i, crop in enumerate(crops):
-                # crop 保存
-                crop_path = os.path.join(debug_dir, f"crop_{i:02d}.png")
-                cv2.imwrite(crop_path, cv2.cvtColor(crop, cv2.COLOR_RGB2BGR))
-
-                # 全ラベルに対するスコアを計算
                 score_dict = self.clip.score_single(crop)
+                if score_dict is None:
+                    continue
 
-                print(f"[Crop {i:02d}] {crop_path}")
                 for label, score in score_dict.items():
-                    print(f"    {label:10s} : {score:.4f}")
+                    if (
+                        label not in best_per_label
+                        or score > best_per_label[label]["score"]
+                    ):
+                        bbox = bboxes[i]
+
+                        x1, y1, x2, y2 = bbox
+                        cx = int((x1 + x2) / 2)
+                        cy = int((y1 + y2) / 2)
+
+                        depth_m = None
+                        if self.enable_depth and depth_frame is not None:
+                            if depth_frame.shape[:2] == (H, W):
+                                d = float(depth_frame[cy, cx])
+                                if d > 0:
+                                    depth_m = d / 1000.0
+
+                        refined_mask = self.sam.predict_by_bbox(bbox)
+
+                        best_per_label[label] = {
+                            "mask": refined_mask,
+                            "bbox": bbox,
+                            "center_px": (cx, cy),
+                            "score": float(score),
+                            "depth_m": depth_m,
+                        }
 
 
-            if crops:
-                if target_label is None:
-                    # 従来の方式：CLIPスコア最大採用
-                    pick = self.clip.pick_best(crops)
-                else:
-                    # ★ 新方式：LLM の next_food でフィルタした中で最大スコア
-                    pick = self.clip.pick_target(crops, target_label)
-                if pick is not None:
-                    idx = pick["index"]
-                    cls = pick["cls"]
-                    score = float(pick["score"])
-                    bbox = bboxes[idx]
 
-                    # bbox で SAM2 のマスクを再度 refine してもいいし、
-                    # 既存の masks[idx] をそのまま使っても良い。
-                    # ここでは refine して精度を上げる。
-                    refined_mask = self.sam.predict_by_bbox(bbox)
-
-                    # bbox 中心ピクセル
-                    x1, y1, x2, y2 = bbox
-                    cx = int((x1 + x2) / 2)
-                    cy = int((y1 + y2) / 2)
-                    center_px = (cx, cy)
-
-                    # 深度が使える場合は中心の depth を m で取得
-                    depth_m = None
-                    if self.enable_depth and depth_frame is not None:
-                        if (
-                            depth_frame.shape[0] == H
-                            and depth_frame.shape[1] == W
-                        ):
-                            raw_depth = float(depth_frame[cy, cx])  # mm 想定
-                            if raw_depth > 0:
-                                depth_m = raw_depth / 1000.0  # m に変換
-                        # 解像度が合っていない場合は depth_m は None のまま
-
-                    self.last.update(
-                        mask=refined_mask,
-                        bbox=bbox,
-                        label=cls,
-                        score=score,
-                        center_px=center_px,
-                        depth_m=depth_m,
-                    )
-                else:
-                    # CLIP で有力な候補が見つからなかった場合
-                    self.last.update(
-                        mask=None,
-                        bbox=None,
-                        label=None,
-                        score=None,
-                        center_px=None,
-                        depth_m=None,
-                    )
-            else:
-                # 有効マスクが1つもなかった場合
-                self.last.update(
-                    mask=None,
-                    bbox=None,
-                    label=None,
-                    score=None,
-                    center_px=None,
-                    depth_m=None,
-                )
-
-        # FPS の計算（指数移動平均）
         self.frame_count += 1
         dt = max(time.time() - t0, 1e-6)
         fps = 1.0 / dt
-        if self.ema_fps is None:
-            self.ema_fps = fps
-        else:
-            self.ema_fps = 0.9 * self.ema_fps + 0.1 * fps
+        self.ema_fps = fps if self.ema_fps is None else 0.9*self.ema_fps + 0.1*fps
 
-        # 出力をまとめて返す
+        # ★ 必ず Dict を返す
         return {
-            "mask": self.last["mask"],
-            "bbox": self.last["bbox"],
-            "label": self.last["label"],
-            "score": self.last["score"],
-            "center_px": self.last["center_px"],
-            "depth_m": self.last["depth_m"],
+            "instances": best_per_label,
             "fps": self.ema_fps,
         }
-    
+
 
 
 
