@@ -82,38 +82,45 @@ def main():
 
     # OpenCV calibrateHandEye に渡すためのリスト
     # Base -> Gripper
+    R_gripper2base_list = []
+    t_gripper2base_list = []
     R_base2gripper_list = []
     t_base2gripper_list = []
     # Target(Marker) -> Camera (OpenCVの仕様上、Camera->MarkerではなくTarget->Camの形式で扱う場合があるが、
     # calibrateHandEyeは通常 Camera coord での Marker pose を入力する)
-    R_target2cam_list = []
-    t_target2cam_list = []
+    R_cam2target_list = []
+    t_cam2target_list = []
 
     sample_count = 0
 
     while True:
-        user_input = input(f"\n[{sample_count + 1}枚目] Enterで撮影 (qで終了): ").strip().lower()
-        if user_input == 'q':
-            if sample_count < 3:
-                print("⚠ 最低3枚のデータが必要です。")
-                continue
-            break
+        #user_input = input(f"\n[{sample_count + 1}枚目] Enterで撮影 (qで終了): ").strip().lower()
+        #if user_input == 'q':
+        #    if sample_count < 3:
+        #        print("⚠ 最低3枚のデータが必要です。")
+        #        continue
+        #    break
 
         # 1. 画像取得 & マーカー検出
         img = capture_frame(pipeline)
         Rm, tm = detect_marker_pose(img) # Camera -> Marker
 
+        key=0
         if Rm is not None:
             cv2.drawFrameAxes(img, camera_matrix, dist_coeffs, 
                               np.array([cv2.Rodrigues(Rm)[0]]), tm, MARKER_LENGTH * 2)
             cv2.imshow("Frame", img)
-            cv2.waitKey(1)
+            key=cv2.waitKey(10)
         else:
             print("❌ マーカーが見つかりません。")
             cv2.imshow("Frame", img)
             cv2.waitKey(1)
             continue
-
+        if key==ord('q'):
+            break
+        if key!=ord('t'):
+            continue
+        
         # 2. ロボット姿勢取得 (Base -> Gripper)
         # xArmは mm, degree で返ってくる
         code, pose = arm.get_position(is_radian=False)
@@ -133,15 +140,18 @@ def main():
         print(f"  Marker(m): {tm}")
 
         # リストに追加 (絶対姿勢をそのまま保存)
-        R_base2gripper_list.append(R_g)
-        t_base2gripper_list.append(t_g)
+        R_gripper2base_list.append(R_g)
+        t_gripper2base_list.append(t_g)
+        R_base2gripper_list.append(np.transpose(R_g))
+        t_base2gripper_list.append(-np.matmul(np.transpose(R_g),t_g))
         
         # 3. マーカー姿勢取得 (Target -> Camera)
-        R_t2c = Rm
-        t_t2c = tm
+        #invert this, because marker is on the robot hand
+        R_c2t = np.transpose(Rm)
+        t_c2t = -np.matmul(np.transpose(Rm),tm)
 
-        R_target2cam_list.append(R_t2c)
-        t_target2cam_list.append(t_t2c)
+        R_cam2target_list.append(R_c2t)
+        t_cam2target_list.append(t_c2t)
 
         sample_count += 1
         print(f"✓ データ追加 (計 {sample_count} 枚)")
@@ -161,12 +171,19 @@ def main():
     # 出力: R_cam2base, t_cam2base (カメラ座標系からベース座標系への変換、あるいはその逆)
     
     try:
-        R_cam, t_cam = cv2.calibrateHandEye(
+        # R_marker2gripper, t_marker2gripper = cv2.calibrateHandEye(
+        #     R_gripper2base_list,
+        #     t_gripper2base_list,
+        #     R_cam2target_list,
+        #     t_cam2target_list,
+        #     method=cv2.CALIB_HAND_EYE_TSAI
+        # )
+        R_base2camera, t_base2camera, R_gripper2marker, t_gripper2marker = cv2.calibrateRobotWorldHandEye(
+            R_cam2target_list,
+            t_cam2target_list,
             R_base2gripper_list,
             t_base2gripper_list,
-            R_target2cam_list,
-            t_target2cam_list,
-            method=cv2.CALIB_HAND_EYE_TSAI
+            method=cv2.CALIB_ROBOT_WORLD_HAND_EYE_SHAH
         )
     except cv2.error as e:
         print(f"計算エラー: {e}")
@@ -178,47 +195,75 @@ def main():
     # Base_Coordinates = R * Camera_Coordinates + t (またはその逆) の定義を確認する必要がある。
     # OpenCVのドキュメントでは、Eye-to-Handの出力は "rotation and translation of the camera in the robot base frame" とある。
     # つまり T_base_camera を出力する。
+
+    #
+    T_gripper2marker = np.eye(4)
+#    T_base_camera[:3, :3] = R_cam
+#    T_base_camera[:3, 3] = t_cam.flatten()
+    T_gripper2marker[:3, :3] = R_gripper2marker
+    T_gripper2marker[:3, 3] = t_gripper2marker.flatten()
+
     
-    T_base_camera = np.eye(4)
-    T_base_camera[:3, :3] = R_cam
-    T_base_camera[:3, 3] = t_cam.flatten()
+    T_base2camera = np.eye(4)
+#    T_base_camera[:3, :3] = R_cam
+#    T_base_camera[:3, 3] = t_cam.flatten()
+    T_base2camera[:3, :3] = R_base2camera
+    T_base2camera[:3, 3] = t_base2camera.flatten()
 
     print("\n===== CALIBRATION RESULT =====")
     print("T_base_camera (メートル単位):")
-    print(np.round(T_base_camera, 6))
-    
+    print(np.round(T_base2camera, 6))
+    print(np.round(T_gripper2marker,6))
     print("\n【確認用】カメラの位置 (Base座標系, mm):")
-    print(f"X: {T_base_camera[0,3]*1000:.2f} mm")
-    print(f"Y: {T_base_camera[1,3]*1000:.2f} mm")
-    print(f"Z: {T_base_camera[2,3]*1000:.2f} mm")
+    print(f"X: {T_base2camera[0,3]*1000:.2f} mm")
+    print(f"Y: {T_base2camera[1,3]*1000:.2f} mm")
+    print(f"Z: {T_base2camera[2,3]*1000:.2f} mm")
+    print(f"Xm: {T_gripper2marker[0,3]*1000:.2f} mm")
+    print(f"Ym: {T_gripper2marker[1,3]*1000:.2f} mm")
+    print(f"Zm: {T_gripper2marker[2,3]*1000:.2f} mm")
+
 
     # === 検証コード ===
     print("\n=== 精度検証 ===")
     print("取得した最後のデータを使って検証します。")
     
     # 最後のデータ
-    T_base_gripper = rt_to_matrix(R_base2gripper_list[-1], t_base2gripper_list[-1])
-    T_camera_marker = rt_to_matrix(R_target2cam_list[-1], t_target2cam_list[-1])
+
+
+    for i in range(R_gripper2base_list.len()):
+        T_base2gripper = np.eye(4)
+        T_base2gripper[:3, :3] = R_base2gripper_list[i]
+        T_base2gripper[:3, 3] = t_base2gripper_list[i].flatten()
+        T_cam2marker = np.eye(4)
+        T_cam2marker[:3, :3] = R_cam2target_list[i]
+        T_cam2marker[:3, 3] = t_cam2target_list[i].flatten()
+
+        samePoint=np.matmul(np.linalg.inv(np.matmul(T_cam2marker,T_base2camera)),np.matmul(T_gripper2marker,T_base2gripper))
+
+        #transform
+        
+    #T_gripper2base = rt_to_matrix(R_gripper2base_list[-1], t_gripper2base_list[-1])
+    #T_camera2marker = rt_to_matrix(R_cam2target_list[-1], t_cam2target_list[-1])
     
     # 計算上のマーカー位置 (Base座標系)
     # P_base = T_base_camera * P_camera (マーカー位置)
     # T_base_marker_calc = T_base_camera @ T_camera_marker
-    T_base_marker_calc = T_base_camera @ T_camera_marker
+    #T_marker2base_calc = T_base_camera @ T_camera_marker
     
-    pos_marker_in_base = T_base_marker_calc[:3, 3]
-    pos_gripper_in_base = T_base_gripper[:3, 3]
+    #pos_marker_in_base = T_base_marker_calc[:3, 3]
+    #pos_gripper_in_base = T_base_gripper[:3, 3]
     
-    print(f"ロボット手先位置 (Base系): {pos_gripper_in_base}")
-    print(f"カメラから計算したマーカー位置 (Base系): {pos_marker_in_base}")
+    #print(f"ロボット手先位置 (Base系): {pos_gripper_in_base}")
+    #print(f"カメラから計算したマーカー位置 (Base系): {pos_marker_in_base}")
     
-    diff = pos_marker_in_base - pos_gripper_in_base
-    dist_error = np.linalg.norm(diff)
+    #diff = pos_marker_in_base - pos_gripper_in_base
+    #dist_error = np.linalg.norm(diff)
     
-    print(f"\nズレ (Marker - Gripper): {diff}")
-    print(f"距離誤差: {dist_error*1000:.2f} mm")
-    print("※ Eye-to-Handの場合、グリッパー位置とマーカー貼り付け位置には物理的なオフセットがあるため、")
-    print("   この「距離誤差」は『グリッパー中心からマーカーまでの距離』に近い値になるはずです。")
-    print("   （数メートルにならなければ成功です）")
+    # print(f"\nズレ (Marker - Gripper): {diff}")
+    # print(f"距離誤差: {dist_error*1000:.2f} mm")
+    # print("※ Eye-to-Handの場合、グリッパー位置とマーカー貼り付け位置には物理的なオフセットがあるため、")
+    # print("   この「距離誤差」は『グリッパー中心からマーカーまでの距離』に近い値になるはずです。")
+    # print("   （数メートルにならなければ成功です）")
 
 if __name__ == "__main__":
     main()
