@@ -173,6 +173,11 @@ def build_manual_clip_prompts() -> Dict[str, Any]:
             "brown curry gravy"
             "curry sauce without rice"
         ],
+        "Cone": [
+            "a plate of yellow sweet corn kernels",
+            "a pile of glossy yellow corn kernels",
+            "a yellow corn grains, isolated on white plate",
+        ],
     }
 
 

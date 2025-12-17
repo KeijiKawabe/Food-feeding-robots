@@ -1,5 +1,7 @@
 import pyrealsense2 as rs
-
+# ============================================
+#  RealSense カメラの内部パラメータを取得
+# ============================================
 # パイプラインの設定
 pipeline = rs.pipeline()
 config = rs.config()
