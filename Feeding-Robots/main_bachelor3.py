@@ -100,10 +100,11 @@ def build_manual_clip_prompts():
         #     "a bowl of rice porridge",
         #     "okayuu food"
         # ]
-        "potato salad":[
-           " potato salad with potatoes and mayonnaise",
-           " potato salad with carrots",
-        ]
+        "Cone": [
+            "a plate of yellow sweet corn kernels",
+            "a pile of glossy yellow corn kernels",
+            "a yellow corn grains, isolated on white plate",
+        ],
     }
 
 

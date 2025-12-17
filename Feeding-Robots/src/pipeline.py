@@ -113,6 +113,11 @@ class PerceptionPipeline:
             "depth_m": None,
         }
 
+        # __init__ の最後あたりに追加
+        self.last_instances: Dict[str, Any] = {}   # label -> best instance
+        self.last_candidates: list = []            # デバッグ用（任意）
+
+
     # --- CLIP プロンプトを途中で変えたい場合用 ---
     def update_clip_prompts(self, prompts) -> None:
         """
@@ -590,6 +595,182 @@ class PerceptionPipeline:
             "instances": best_per_label,
             "fps": self.ema_fps,
         }
+    def process_frame2(
+        self,
+        frame_bgr: np.ndarray,
+        depth_frame: Optional[np.ndarray] = None,
+        target_label: Optional[str] = None,
+        save_best_crops: bool = True,
+        debug_dir: str = "debug_crops",
+    ) -> Dict[str, Any]:
+        """
+        process_frame 改良版（ラベル別ベストを返す + キャッシュ対応）
+
+        - 各cropについて CLIPを全ラベルでスコア → labelごとのargmaxを保持
+        - maskgen_interval の間は前回の結果を返す（空にならない）
+        - target_label が指定されたら、そのラベルだけ返す（LLM連携用）
+        - best候補の crop/masked crop を保存可能（検証用）
+
+        Returns:
+        {
+            "instances": {label: {"mask","bbox","center_px","score","depth_m","crop_path","masked_crop_path"}},
+            "fps": float,
+            "candidates": [...]  # 任意のデバッグ
+        }
+        """
+        t0 = time.time()
+
+        rgb = to_rgb(frame_bgr)
+        H, W = rgb.shape[:2]
+
+        need_new_masks = (
+            self.frame_count % self.maskgen_interval == 0
+            or (self.last_instances is None)
+            or (len(self.last_instances) == 0)
+        )
+
+        # --- helper: depth median in mask (頑健) ---
+        def depth_m_from_mask(mask: np.ndarray) -> Optional[float]:
+            if (not self.enable_depth) or (depth_frame is None) or (mask is None):
+                return None
+            if depth_frame.shape[:2] != (H, W):
+                return None
+            vals = depth_frame[mask > 0]
+            vals = vals[vals > 0]
+            if vals.size == 0:
+                return None
+            return float(np.median(vals)) / 1000.0  # mm -> m
+
+        # --- helper: save crop & masked crop for BEST only ---
+        def save_best_crop(label: str, score: float, bbox, mask_full: Optional[np.ndarray]):
+            if not save_best_crops or bbox is None:
+                return None, None
+
+            os.makedirs(debug_dir, exist_ok=True)
+            x1, y1, x2, y2 = map(int, bbox)
+            x1 = max(0, min(x1, W - 1))
+            x2 = max(0, min(x2, W))
+            y1 = max(0, min(y1, H - 1))
+            y2 = max(0, min(y2, H))
+            if (x2 - x1) <= 2 or (y2 - y1) <= 2:
+                return None, None
+
+            crop = rgb[y1:y2, x1:x2].copy()
+            ts = int(time.time() * 1000)
+            base = os.path.join(debug_dir, f"best_{label}_s{score:.3f}_{ts}")
+
+            crop_path = base + ".png"
+            cv2.imwrite(crop_path, cv2.cvtColor(crop, cv2.COLOR_RGB2BGR))
+
+            masked_path = None
+            if mask_full is not None:
+                m = mask_full[y1:y2, x1:x2]
+                m = (m > 0).astype(np.uint8) * 255
+                crop_bgr = cv2.cvtColor(crop, cv2.COLOR_RGB2BGR)
+                masked = cv2.bitwise_and(crop_bgr, crop_bgr, mask=m)
+                masked_path = base + "_masked.png"
+                cv2.imwrite(masked_path, masked)
+
+            return crop_path, masked_path
+
+        # =========================
+        # 1) 新規にSAM2+CLIPを回す
+        # =========================
+        if need_new_masks:
+            self.sam.set_image(rgb)
+            masks = self.sam.generate_masks(rgb)
+            print(f"DEBUG: SAM2 generated {len(masks)} raw masks.")
+
+            masks = filter_masks_by_area(
+                masks,
+                H, W,
+                self.min_area,
+                self.max_area_frac,
+            )
+
+            crops, bboxes = masks_to_crops_and_bboxes(rgb, masks)
+            print(f"DEBUG: After area filter, {len(masks)} masks remain.")
+            print("\n--- DEBUG: CLIP crop & score list ---")
+
+            best_per_label: Dict[str, Dict[str, Any]] = {}
+            candidates = []  # 任意：あとで分析したい人向け
+
+            for i, crop in enumerate(crops):
+                score_dict = self.clip.score_single(crop)
+                if score_dict is None:
+                    continue
+
+                bbox = bboxes[i]
+                x1, y1, x2, y2 = bbox
+                cx = int((x1 + x2) / 2)
+                cy = int((y1 + y2) / 2)
+
+                # （任意）候補ログ
+                candidates.append({
+                    "index": i,
+                    "bbox": bbox,
+                    "center_px": (cx, cy),
+                    "scores": {k: float(v) for k, v in score_dict.items()},
+                })
+
+                # labelごとのargmax更新
+                for label, score in score_dict.items():
+                    prev = best_per_label.get(label)
+                    if (prev is None) or (score > prev["score"]):
+                        # bboxベースで refine（あなたの現方式踏襲）
+                        refined_mask = self.sam.predict_by_bbox(bbox)
+
+                        # depth：中心点より mask中央値が安定（推奨）
+                        depth_m = depth_m_from_mask(refined_mask)
+                        if depth_m is None and self.enable_depth and depth_frame is not None:
+                            # 保険：中心点深度
+                            if depth_frame.shape[:2] == (H, W):
+                                d = float(depth_frame[cy, cx])
+                                if d > 0:
+                                    depth_m = d / 1000.0
+
+                        crop_path, masked_path = save_best_crop(label, float(score), bbox, refined_mask)
+
+                        best_per_label[label] = {
+                            "mask": refined_mask,
+                            "bbox": bbox,
+                            "center_px": (cx, cy),
+                            "score": float(score),
+                            "depth_m": depth_m,
+                            "crop_path": crop_path,
+                            "masked_crop_path": masked_path,
+                        }
+
+            # キャッシュ更新（重要）
+            self.last_instances = best_per_label
+            self.last_candidates = candidates
+
+        # =========================
+        # 2) maskgen_interval中はキャッシュを返す
+        # =========================
+        instances = self.last_instances if self.last_instances is not None else {}
+        candidates = self.last_candidates if self.last_candidates is not None else []
+
+        # target_label 指定があるならフィルタ（LLMが決めたラベルだけ欲しいとき用）
+        if target_label is not None:
+            if target_label in instances:
+                instances = {target_label: instances[target_label]}
+            else:
+                # 無い場合は空を返す（main側でフォールバックしてもOK）
+                instances = {}
+
+        # FPS
+        self.frame_count += 1
+        dt = max(time.time() - t0, 1e-6)
+        fps = 1.0 / dt
+        self.ema_fps = fps if self.ema_fps is None else 0.9 * self.ema_fps + 0.1 * fps
+
+        return {
+            "instances": instances,
+            "fps": self.ema_fps,
+            "candidates": candidates,
+        }
+
 
 
 

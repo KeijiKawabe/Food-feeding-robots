@@ -71,6 +71,16 @@ def load_calibration(path: str) -> Dict[str, Any]:
     return data
 
 
+def CheckIfNewPositionInWorkspace(x,y,z):
+    if x > 500  or x < 300:
+        return False
+    if y < -200 or y > 300:
+        return False
+    if z < 94 or z > 400:
+        return False
+    return True
+
+
 def init_xarm(ip: str) -> XArmAPI:
     arm = XArmAPI(ip)
     print(f"[xArm] 接続中... IP={ip}")
@@ -254,6 +264,38 @@ def move_robot_to_food(arm: XArmAPI, center_px, depth_m: float, calib: Dict[str,
 
     print("====================================")
     # TODO: arm.set_position() などは現状のまま続けてOK
+    if P_base is not None:
+        # mm 単位に変換
+        x_mm, y_mm, z_mm = x_b * 1000 - 240, y_b * 1000, 220
+        CheckIfNewPositionInWorkspace(x_mm, y_mm, z_mm + 50)
+        # アプローチ姿勢
+        arm.set_position(
+            x_mm, y_mm, z_mm + 50,   # 5cm 上から
+            roll=-135, pitch=0, yaw=-90,
+            speed=50, mvacc=1000,
+            wait=True
+        )
+        CheckIfNewPositionInWorkspace(x_mm, y_mm, z_mm)
+        arm.set_position(
+            x_mm, y_mm, z_mm,   # 5cm 上から
+            roll=-135, pitch=0, yaw=-90,
+            speed=50, mvacc=1000,
+            wait=True
+        )
+        CheckIfNewPositionInWorkspace(x_mm + 80, y_mm, z_mm)
+        arm.set_position(
+            x_mm + 80, y_mm, z_mm,   # 5cm 上から
+            roll=-135, pitch=0, yaw=-90,
+            speed=50, mvacc=1000,
+            wait=True
+        )
+        CheckIfNewPositionInWorkspace(x_mm + 80, y_mm, z_mm)
+        arm.set_position(
+            x_mm + 80, y_mm, z_mm,   # 5cm 上から
+            roll=-90, pitch=0, yaw=-90,
+            speed=50, mvacc=1000,
+            wait=True
+        )
 
 
 def move_food_to_mouth(arm: XArmAPI):
