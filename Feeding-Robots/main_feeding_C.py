@@ -1,12 +1,12 @@
 # main_feeding_robot_no_thermal.py
 """
-食事介助ロボット・メインスクリプト（v1 / 条件B: Thermalなし / LLMが食材ラベル選択）
+食事介助ロボット・メインスクリプト（v1 / 条件B: Thermalなし / ランダムで食材ラベル選択）
 
 構成:
 - RealSense から RGB-D を取得
 - SAM2 + CLIP で食材のマスク / BBox / ラベルを推定
 - 各食材ラベルごとに「最もスコアが高い候補（=ベスト）」を保持
-- GPT に「ラベル別候補 + 食事履歴」を渡して「次に食べるラベル」を決定
+- （変更点）LLMではなくランダム関数で「次に食べるラベル」を決定
 - 決定ラベルの座標（center/depth）を引っ張って xArm を制御する
 """
 
@@ -14,13 +14,19 @@ import os
 import sys
 import time
 import json
+import random
 from typing import Dict, Any, Optional, Tuple
 
 import cv2
 import numpy as np
 import pyrealsense2 as rs
 from xarm.wrapper import XArmAPI
-from openai import OpenAI
+
+# PROMPT_MODE == "llm" を使う場合のみ OpenAI を使う（キー無し実験を可能にする）
+try:
+    from openai import OpenAI
+except Exception:
+    OpenAI = None  # type: ignore
 
 # --- プロジェクト内モジュール ---
 THIS_DIR = os.path.dirname(__file__)
@@ -45,10 +51,15 @@ SAM2_CKPT = os.path.join(
     PROJECT_ROOT, "..", "sam2", "checkpoints", "sam2.1_hiera_base_plus.pt"
 )
 
-PROMPT_MODE = "manual"
+PROMPT_MODE = "manual"   # "manual" or "llm"
 
 DEBUG_CROP_DIR = os.path.join(PROJECT_ROOT, "debug_crops")
 os.makedirs(DEBUG_CROP_DIR, exist_ok=True)
+
+# --- ランダム選択の実験用設定 ---
+RANDOM_SEED = 0          # 再現性が要るなら 0 など固定 / 毎回変えたいなら None
+AVOID_IMMEDIATE_REPEAT = False   # 連続同一ラベルを避ける（候補が2つ以上あるときのみ）
+MIN_SCORE_TO_ACCEPT = None      # 例: 15.0 など。Noneならスコアで弾かず必ず候補から選ぶ
 
 
 # ==============================
@@ -127,7 +138,7 @@ def build_manual_clip_prompts() -> Dict[str, Any]:
     }
 
 
-def build_clip_prompts_with_gpt(client: OpenAI, color_image: np.ndarray) -> Dict[str, Any]:
+def build_clip_prompts_with_gpt(client, color_image: np.ndarray) -> Dict[str, Any]:
     import base64
 
     ok, buf = cv2.imencode(".jpg", color_image)
@@ -194,10 +205,6 @@ def save_crop_and_masked(
     bbox: Optional[list],
     mask: Optional[np.ndarray],
 ) -> Dict[str, Optional[str]]:
-    """
-    bbox: [x1,y1,x2,y2]
-    mask: HxW (0/1 or 0/255)
-    """
     os.makedirs(out_dir, exist_ok=True)
 
     if bbox is None:
@@ -229,73 +236,42 @@ def save_crop_and_masked(
     return {"crop_path": crop_path, "masked_crop_path": masked_path}
 
 
-def decide_next_label_llm(
-    client: OpenAI,
+# ==============================
+# （変更点）ランダムで次ラベルを選ぶ
+# ==============================
+
+def decide_next_label_random(
     per_label_best: Dict[str, Dict[str, Any]],
     history: list,
+    rng: random.Random,
+    avoid_immediate_repeat: bool = True,
+    min_score_to_accept: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
-    LLM が「次に食べるラベル」を決める（Thermalなし）。
-    戻り値（strict JSON）:
+    ランダムで次に食べるラベルを決める（Thermalなし / LLMなし）
+    戻り値:
       {"allow": bool, "food_label": "<exact label or null>", "reason": str}
     """
-    from collections import Counter
-    counts = dict(Counter(history))
+    if not per_label_best:
+        return {"allow": False, "food_label": None, "reason": "no_candidates"}
+
+    # 候補抽出（必要なら最低スコアでフィルタ）
+    labels = list(per_label_best.keys())
+    if min_score_to_accept is not None:
+        labels = [l for l in labels if float(per_label_best[l].get("score", 0.0)) >= float(min_score_to_accept)]
+
+    if not labels:
+        return {"allow": False, "food_label": None, "reason": "all_candidates_below_threshold"}
+
+    # 直前と同じラベルを避ける（候補が複数あるときのみ）
     last = history[-1] if history else None
+    if avoid_immediate_repeat and last in labels and len(labels) >= 2:
+        labels_wo_last = [l for l in labels if l != last]
+        if labels_wo_last:
+            labels = labels_wo_last
 
-    # LLMに渡す情報を軽量化（bbox等は必要なら入れる）
-    summary = []
-    for lbl, rec in per_label_best.items():
-        summary.append({
-            "label": lbl,
-            "score": float(rec.get("score", 0.0)),
-            "center_px": rec.get("center_px"),
-            "depth_m": rec.get("depth_m"),
-        })
-    summary.sort(key=lambda x: x["score"], reverse=True)
-
-    allowed_labels = list(per_label_best.keys())
-
-    prompt = f"""
-You are a task planner for a meal-assistance robot (no thermal).
-
-You must choose the next food label to feed using:
-- Per-label best RGB candidates (CLIP score, center, depth)
-- Eating history (variety constraint)
-
-Per-label candidates (JSON list):
-{json.dumps(summary, ensure_ascii=False)}
-
-Eating history: {history}
-Counts: {counts}
-Last eaten: {last}
-
-Rules:
-1) Choose exactly one label from this allowed list:
-{allowed_labels}
-2) Prefer higher score (more reliable detection).
-3) Prefer variety: avoid repeating the same label too many times in a row.
-4) If all candidates seem unreliable (very low score), you may set allow=false.
-
-Output STRICT JSON only:
-{{
-  "allow": true/false,
-  "food_label": "<one of allowed labels or null>",
-  "reason": "<short English reason>"
-}}
-"""
-    try:
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,
-            temperature=0,
-        )
-        txt = resp.choices[0].message.content
-        return json.loads(txt)
-    except Exception as e:
-        print("⚠ LLM planning failed:", e)
-        return {"allow": False, "food_label": None, "reason": "LLM_error"}
+    chosen = rng.choice(labels)
+    return {"allow": True, "food_label": chosen, "reason": "random_choice"}
 
 
 # ---- ここから下は座標変換・ロボット ----
@@ -343,18 +319,23 @@ def move_robot_to_food(arm: XArmAPI, center_px, depth_m: float, calib: Dict[str,
     # mm 単位に変換（※あなたの補正 -240 と固定Z=220 はそのまま踏襲）
     x_mm, y_mm, z_mm = x_b * 1000 - 240, y_b * 1000, 220
 
-    # workspaceチェック（ダメなら中断）
     if not CheckIfNewPositionInWorkspace(x_mm, y_mm, z_mm + 50):
         print("⚠ Workspace外（approach）。移動中止。")
         move_first_position(arm=arm)
         return
 
+    # arm.set_position(
+    #     x_mm, y_mm, z_mm + 50,
+    #     roll=135, pitch=0, yaw=90,
+    #     speed=50, mvacc=1000, wait=True
+    # )
     arm.set_position(
         x_mm, y_mm, z_mm + 50,
         roll=-135, pitch=0, yaw=-90,
         speed=50, mvacc=1000, wait=True
     )
     error = 2
+    #error = 4
 
     if not CheckIfNewPositionInWorkspace(x_mm, y_mm, z_mm):
         print("⚠ Workspace外（target）。移動中止。")
@@ -386,7 +367,6 @@ def move_robot_to_food(arm: XArmAPI, center_px, depth_m: float, calib: Dict[str,
 
 
 def move_food_to_mouth(arm: XArmAPI):
-    #arm.set_position(360, 40, 320, -90, 0, -90)
     arm.set_position(430, 20, 300, -90, 0, -90)
 
 def move_first_position(arm: XArmAPI):
@@ -394,14 +374,20 @@ def move_first_position(arm: XArmAPI):
 
 
 def main():
-    print("=== Meal-Assistance Robot Main (Condition B: No Thermal / LLM chooses label) ===")
+    print("=== Meal-Assistance Robot Main (Condition B: No Thermal / RANDOM chooses label) ===")
     print("Project root:", PROJECT_ROOT)
 
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        print("❌ OPENAI_API_KEY が環境変数として設定されていません。")
-        return
-    client = OpenAI(api_key=api_key)
+    # PROMPT_MODE が llm のときだけ OpenAI クライアントを用意
+    client = None
+    if PROMPT_MODE == "llm":
+        if OpenAI is None:
+            print("❌ openai パッケージが無いので PROMPT_MODE='llm' は使えません。")
+            return
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            print("❌ PROMPT_MODE='llm' ですが OPENAI_API_KEY が設定されていません。")
+            return
+        client = OpenAI(api_key=api_key)
 
     try:
         calib = load_calibration(CALIB_PATH)
@@ -434,6 +420,9 @@ def main():
 
     eat_history = []
 
+    # ランダム生成器（再現性のため固定seed可）
+    rng = random.Random(RANDOM_SEED)
+
     try:
         while True:
             cmd = input("\n>>> 次の一口を開始するには Enter、終了するには q + Enter: ").strip().lower()
@@ -454,7 +443,7 @@ def main():
             color_image = np.asanyarray(color_frame.get_data())
 
             if PROMPT_MODE == "llm":
-                auto_prompts = build_clip_prompts_with_gpt(client, color_image)
+                auto_prompts = build_clip_prompts_with_gpt(client, color_image)  # type: ignore
                 if auto_prompts:
                     pipe.update_clip_prompts(auto_prompts)
 
@@ -466,7 +455,7 @@ def main():
                 print("⚠ 食材が認識できませんでした。次のループへ。")
                 continue
 
-            # --- ラベルごとのベストを構成（instancesが既にラベル別ベストならそのまま） ---
+            # --- ラベルごとのベストを構成 ---
             per_label_best: Dict[str, Dict[str, Any]] = {}
             for lbl, inst in instances.items():
                 center_px = inst.get("center_px")
@@ -490,7 +479,7 @@ def main():
             for lbl, rec in sorted(per_label_best.items(), key=lambda kv: kv[1]["score"], reverse=True):
                 print(f"{lbl:20s} score={rec['score']:.3f} center={rec['center_px']} depth_m={rec['depth_m']} fps={fps}")
 
-            # --- 各ラベルのcrop/マスクcropを保存（検証用） ---
+            # --- 各ラベルのcrop/マスクcropを保存 ---
             saved_paths = {}
             for lbl, rec in per_label_best.items():
                 saved_paths[lbl] = save_crop_and_masked(
@@ -502,29 +491,30 @@ def main():
                     mask=rec.get("mask"),
                 )
 
-            # --- LLM が「次に食べるラベル」を決める ---
-            decision = decide_next_label_llm(
-                client=client,
+            # --- （変更点）ランダムで「次に食べるラベル」を決める ---
+            decision = decide_next_label_random(
                 per_label_best=per_label_best,
                 history=eat_history,
+                rng=rng,
+                avoid_immediate_repeat=AVOID_IMMEDIATE_REPEAT,
+                min_score_to_accept=MIN_SCORE_TO_ACCEPT,
             )
             allow = decision.get("allow", False)
             chosen_label = decision.get("food_label", None)
             reason = decision.get("reason", "")
 
-            print("\n--- LLM Decision (Choose Label / No Thermal) ---")
+            print("\n--- RANDOM Decision (Choose Label / No Thermal) ---")
             print("allow      :", allow)
             print("food_label :", chosen_label)
             print("reason     :", reason)
 
             if not allow or not chosen_label:
-                print("⚠ LLM 判定により、この一口はスキップします。")
+                print("⚠ 判定により、この一口はスキップします。")
                 continue
 
-            # --- LLMラベルから座標を引っ張る（表記ゆれ対策はここで必要なら追加） ---
+            # --- ラベルから座標を引っ張る ---
             if chosen_label not in per_label_best:
-                # 最後の保険：一番スコアが高いラベルにフォールバック
-                print("⚠ LLMのfood_labelがper_label_bestに無い。最高スコアにフォールバックします。")
+                print("⚠ chosen_label が per_label_best に無い。最高スコアにフォールバックします。")
                 chosen_label, chosen_rec = max(per_label_best.items(), key=lambda kv: kv[1]["score"])
             else:
                 chosen_rec = per_label_best[chosen_label]
@@ -533,7 +523,7 @@ def main():
             center_px = chosen_rec.get("center_px")
             depth_m = chosen_rec.get("depth_m")
 
-            print("\n--- EXECUTE TARGET (from LLM label) ---")
+            print("\n--- EXECUTE TARGET (from RANDOM label) ---")
             print("chosen_label:", chosen_label)
             print("bbox       :", bbox)
             print("center_px  :", center_px)
@@ -562,20 +552,17 @@ def main():
                 if inst.get("mask") is not None:
                     vis = draw_mask_on_image(vis, inst["mask"])
 
-            # chosen bbox を描画
             if bbox is not None:
                 x1, y1, x2, y2 = bbox
                 cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 cv2.putText(vis, f"CHOSEN: {chosen_label}", (x1, max(0, y1 - 8)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-            cv2.imshow("Feeding Perception (Per-label best + LLM chosen)", vis)
+            cv2.imshow("Feeding Perception (Per-label best + RANDOM chosen)", vis)
             print("  → ウィンドウに RGB 認識結果を表示しました。何かキーを押すと閉じます。")
             cv2.waitKey(0)
             cv2.destroyAllWindows()
 
-            # 口元へ（必要ならEnter待ちにするのがおすすめ）
-            # input(">>> 食材位置へ行きました。口元へ運ぶには Enter: ")
             move_food_to_mouth(arm=arm)
             print("初期位置に戻すためにfを押してください")
             cv2.namedWindow("WAIT_KEY", cv2.WINDOW_NORMAL)
@@ -586,12 +573,11 @@ def main():
                 if key == ord('f'):
                     move_first_position(arm=arm)
                     break
-                if key == ord('q') or key == 27:  # q or ESC で中断したい場合
+                if key == ord('q') or key == 27:
                     print("中断しました。")
                     break
 
             cv2.destroyWindow("WAIT_KEY")
-
 
     finally:
         try:
