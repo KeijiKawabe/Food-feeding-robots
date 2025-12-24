@@ -317,7 +317,7 @@ def move_robot_to_food(arm: XArmAPI, center_px, depth_m: float, calib: Dict[str,
     print("====================================")
 
     # mm 単位に変換（※あなたの補正 -240 と固定Z=220 はそのまま踏襲）
-    x_mm, y_mm, z_mm = x_b * 1000 - 240, y_b * 1000, 220
+    x_mm, y_mm, z_mm = x_b * 1000 - 240, y_b * 1000, 210
 
     if not CheckIfNewPositionInWorkspace(x_mm, y_mm, z_mm + 50):
         print("⚠ Workspace外（approach）。移動中止。")
@@ -334,7 +334,7 @@ def move_robot_to_food(arm: XArmAPI, center_px, depth_m: float, calib: Dict[str,
         roll=-135, pitch=0, yaw=-90,
         speed=50, mvacc=1000, wait=True
     )
-    error = 2
+    error = 13
     #error = 4
 
     if not CheckIfNewPositionInWorkspace(x_mm, y_mm, z_mm):

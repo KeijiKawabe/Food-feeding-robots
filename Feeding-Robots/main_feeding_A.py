@@ -354,7 +354,7 @@ def move_robot_to_food(arm: XArmAPI, center_px, depth_m: float, calib: Dict[str,
         roll=-135, pitch=0, yaw=-90,
         speed=50, mvacc=1000, wait=True
     )
-    error = 15
+    error = 13
 
     if not CheckIfNewPositionInWorkspace(x_mm, y_mm, z_mm):
         print("⚠ Workspace外（target）。移動中止。")

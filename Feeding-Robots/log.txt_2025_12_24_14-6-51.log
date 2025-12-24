@@ -1,0 +1,79 @@
+DEBUG [IRLogger.cpp:105] @ 0.0003077s :***************************************************
+DEBUG [IRLogger.cpp:106] @ 0.0003825s :* IRImagerDirect SDK                              *
+DEBUG [IRLogger.cpp:107] @ 0.0004024s :***************************************************
+DEBUG [IRLogger.cpp:113] @ 0.0004175s :* Native Machine:      AMD64
+DEBUG [IRLogger.cpp:114] @ 0.0005284s :* Machine:             AMD64
+DEBUG [IRLogger.cpp:116] @ 0.0005897s :* OS:                  Windows 10 0 26100
+DEBUG [IRLogger.cpp:123] @ 0.0006041s :***************************************************
+DEBUG [IRDeviceParams.cpp:204] @ 0.0014234s :Parameters
+DEBUG [IRDeviceParams.cpp:205] @ 0.0014447s :serial: 14110095
+DEBUG [IRDeviceParams.cpp:206] @ 0.0014525s :videoformatindex: 0
+DEBUG [IRDeviceParams.cpp:207] @ 0.0014595s :fov: 0
+DEBUG [IRDeviceParams.cpp:208] @ 0.0014665s :optics_text: 0000000000000000
+DEBUG [IRDeviceParams.cpp:209] @ 0.0014737s :formatspath: 00000184E89871A0
+DEBUG [IRDeviceParams.cpp:210] @ 0.0014815s :calipath: 00000184F2FFD0B0
+DEBUG [IRDeviceParams.cpp:211] @ 0.0014884s :temperature min: 0
+DEBUG [IRDeviceParams.cpp:212] @ 0.0014949s :temperature max: 0
+DEBUG [IRDeviceParams.cpp:213] @ 0.0015047s :framerate: 32
+DEBUG [IRDeviceParams.cpp:214] @ 0.0015152s :bispectral: 0
+DEBUG [IRDeviceParams.cpp:215] @ 0.0015246s :flag automatic: 1
+DEBUG [IRDeviceParams.cpp:216] @ 0.0015349s :min interval: 15
+DEBUG [IRDeviceParams.cpp:217] @ 0.0015453s :max interval: 0
+DEBUG [IRDeviceParams.cpp:218] @ 0.0015554s :chip heating mode: 0
+DEBUG [IRDeviceParams.cpp:219] @ 0.0015664s :chip heating fixed val: 40
+DEBUG [IRDeviceParams.cpp:220] @ 0.0015754s :focus:  -1
+DEBUG [IRDeviceParams.cpp:221] @ 0.0015846s :enable extended temp range: 0
+DEBUG [IRDeviceParams.cpp:222] @ 0.001592s :buffer queue size: 5
+DEBUG [IRDeviceParams.cpp:223] @ 0.0017267s :enable high precision: 0
+DEBUG [IRDeviceParams.cpp:224] @ 0.0017453s :radialDistortionCorrectionMode: 0
+DEBUG [IRDeviceParams.cpp:225] @ 0.0017531s :deviceAPI: 0
+DEBUG [IRDeviceParams.cpp:226] @ 0.0017605s :useExternalProbeForReferencing: 0
+DEBUG [IRDeviceParams.cpp:227] @ 0.0017676s :enableMultiThreading: 0
+DEBUG [IRDeviceParams.cpp:232] @ 0.0017781s :ethernetDevice.deviceIpAddress: 0.0.0.0
+DEBUG [IRDeviceParams.cpp:233] @ 0.0017854s :ethernetDevice.localUdpPort: 0
+DEBUG [IRDeviceParams.cpp:234] @ 0.0017922s :ethernetDevice.checkUdpSenderIp: 1
+DEBUG [Cali.cpp:87] @ 0.241359s :Calibration directory path: .\Cali-14110095.xml
+DEBUG [Cali.cpp:88] @ 0.241387s :Calibration file name: Cali-14110095.xml
+DEBUG [Cali.cpp:98] @ 0.241853s :Calibration data A: 1450 B:400 C:4095 D:1000
+INFO [IRImager.cpp:266] @ 0.242917s :Init thermal imager to 14110095 with size: 160x121@120 Hz
+DEBUG [Cali.cpp:87] @ 0.243174s :Calibration directory path: .\Cali-14110095.xml
+DEBUG [Cali.cpp:88] @ 0.243184s :Calibration file name: Cali-14110095.xml
+DEBUG [Cali.cpp:98] @ 0.243401s :Calibration data A: 1450 B:400 C:4095 D:1000
+DEBUG [Cali.cpp:87] @ 0.244083s :Calibration directory path: .\Cali-14110095.xml
+DEBUG [Cali.cpp:88] @ 0.244097s :Calibration file name: Cali-14110095.xml
+DEBUG [Cali.cpp:98] @ 0.244288s :Calibration data A: 1450 B:400 C:4095 D:1000
+DEBUG [IRImager.cpp:300] @ 0.244331s :No temperature range configuration specified. Setting default values tMin: -20 , tMax: 100
+DEBUG [IRImager.cpp:377] @ 0.244652s :Using HID control interface
+DEBUG [IRImager.cpp:417] @ 0.26606s :Initialized HID control interface to device with HW:21 FW:2025
+DEBUG [IRImager.cpp:438] @ 0.266085s :Frameconfig - width(in): 160, height(in): 121, interval: 83333, max framerate: 120, HW interval: 0.00833333
+DEBUG [Cali.cpp:87] @ 0.266097s :Calibration directory path: .\Cali-14110095.xml
+DEBUG [Cali.cpp:88] @ 0.266104s :Calibration file name: Cali-14110095.xml
+DEBUG [Cali.cpp:98] @ 0.266353s :Calibration data A: 1450 B:400 C:4095 D:1000
+DEBUG [ImageProcessing.cpp:200] @ 0.282493s :Source buffer size: 38720 Width: 160 Height: 121
+DEBUG [ImageProcessing.cpp:121] @ 0.348473s :Source buffer size: 38720 Width: 160 Height: 121
+DEBUG [OpSource.cpp:376] @ 0.348648s :Using formats path: C:\Program Files (x86)\Optris GmbH\IrDirectSDK\examples\matlab\Formats.def
+DEBUG [OpSource.cpp:628] @ 0.350142s :Format found with size: 160
+DEBUG [OpSource.cpp:791] @ 0.350169s :Selected Format:"PI160 160x120 @ 120Hz"
+DEBUG [IRImager.cpp:844] @ 0.3502s :Caught onFrameInit with size: 160x120
+DEBUG [OpSource.cpp:376] @ 0.350357s :Using formats path: C:\Program Files (x86)\Optris GmbH\IrDirectSDK\examples\matlab\Formats.def
+DEBUG [OpSource.cpp:628] @ 0.350415s :Format found with size: 160
+DEBUG [OpSource.cpp:376] @ 0.350485s :Using formats path: C:\Program Files (x86)\Optris GmbH\IrDirectSDK\examples\matlab\Formats.def
+DEBUG [OpCorr.cpp:467] @ 0.35704s :Read cali: .\Cali-14110095.xml\Cali-14110095-48-M20-100.dat
+DEBUG [OpCorr.cpp:557] @ 0.357325s :Read calibration of camera no 14110095, # of fields: 6 , start of fields: 40
+DEBUG [ImageProcessing.cpp:1108] @ 0.6466s :Update flag temperature: 28.8516
+DEBUG [ImageProcessing.cpp:1111] @ 0.654825s :Update box temperature: 27.7891
+DEBUG [Cali.cpp:639] @ 0.654854s :Calibration file path: 00000184DAFC42F4/00000005D1DEC6F8.xml
+DEBUG [SimpleXML.cpp:238] @ 0.655031s :Failed to open file .\Cali-14110095.xml\CaliExt-14110095.xml
+DEBUG [IRImager.cpp:550] @ 0.675s :Chip heating disabled
+DEBUG [IRImager.cpp:1110] @ 0.72949s :Start flag calibration
+DEBUG [OpFlag.cpp:591] @ 11.4013s :SkimDiff: -10 Adjust: -948 State: 1 EMax: 8244 Emin: 2456
+DEBUG [ImageProcessing.cpp:526] @ 11.4123s :Skim_Adjust 4016
+DEBUG [IRImager.cpp:1124] @ 11.5292s :Finished startup calibration
+DEBUG [IRImager.cpp:665] @ 25.3414s :Release imager
+DEBUG [BaseControlDevice.cpp:26] @ 25.3927s :Base destructor called
+DEBUG [IRImager.cpp:672] @ 25.3928s :Delete image processing
+DEBUG [IRImager.cpp:679] @ 25.4012s :Delete buffer
+DEBUG [IRImager.cpp:687] @ 25.4013s :Delete source buffer
+DEBUG [IRImager.cpp:694] @ 25.4013s :Delete buffer (energy)
+DEBUG [IRImager.cpp:701] @ 25.4013s :Delete timer
+DEBUG [IRImager.cpp:707] @ 25.4013s :Delete manual timer

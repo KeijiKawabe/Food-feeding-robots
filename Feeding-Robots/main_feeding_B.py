@@ -71,7 +71,7 @@ SAM2_CKPT = os.path.join(
 PROMPT_MODE = "manual"
 
 # Thermal 側の安全温度しきい値（例：65℃）
-SAFE_TEMP_MAX = 65.0
+SAFE_TEMP_MAX = 55
 
 
 # ==============================
@@ -511,7 +511,7 @@ def attach_thermal_to_per_label_best(
         tmean = float(np.mean(r))
         p95 = float(np.percentile(r, 95))
         # “しきい値以上の割合” を特徴量として渡す（閾値で弾くのではなく）
-        safe = float(calib.get("safe_temp_max", 65.0))  # 後で main で入れると楽
+        safe = float(calib.get("safe_temp_max", 55))  # 後で main で入れると楽
         hot_ratio = float(np.mean(r > safe))
 
         rec["thermal"] = {
@@ -527,23 +527,109 @@ def attach_thermal_to_per_label_best(
 
 
 
+# def decide_next_label_with_thermal_llm_A(
+#     client: OpenAI,
+#     per_label_best: Dict[str, Dict[str, Any]],
+#     history: list,
+#     safe_temp_max: float,
+# ) -> Dict[str, Any]:
+#     """
+#     A案：LLM 1回で
+#       - 次に食べるラベル選択
+#       - 食べて良いか(allow)
+#     をまとめて決める
+#     """
+#     from collections import Counter
+#     counts = dict(Counter(history))
+#     last = history[-1] if history else None
+
+#     # LLMに渡す情報（no_thermalのsummaryを拡張）
+#     summary = []
+#     for lbl, rec in per_label_best.items():
+#         th = rec.get("thermal", {})
+#         summary.append({
+#             "label": lbl,
+#             "score": float(rec.get("score", 0.0)),
+#             "center_px": rec.get("center_px"),
+#             "depth_m": rec.get("depth_m"),
+#             "thermal_ok": bool(th.get("ok", False)),
+#             "thermal_mode": th.get("mode", None),
+#             "thermal_npts": th.get("npts", 0),
+#             "temp_min": th.get("min", None),
+#             "temp_mean": th.get("mean", None),
+#             "temp_p95": th.get("p95", None),
+#             "temp_max": th.get("max", None),
+#             "hot_ratio": th.get("hot_ratio", None),
+#         })
+#     summary.sort(key=lambda x: x["score"], reverse=True)
+
+#     allowed_labels = list(per_label_best.keys())
+
+#     prompt = f"""
+# You are a task planner for a meal-assistance robot.
+
+# You must decide:
+# 1) whether the robot should feed now (allow)
+# 2) if allow=true, choose exactly ONE food_label from the allowed list
+
+# You are given per-label best RGB candidates + thermal statistics.
+
+# Candidates (JSON list):
+# {json.dumps(summary, ensure_ascii=False)}
+
+# Eating history: {history}
+# Counts: {counts}
+# Last eaten: {last}
+
+# Thermal safety reference (NOT a hard-coded rule, but a key safety indicator):
+# safe_temp_max = {safe_temp_max:.1f} °C
+
+# Guidance:
+# - Prefer higher RGB score (more reliable detection).
+# - Prefer variety (avoid repeating the same label too many times).
+# - Use thermal stats responsibly:
+#   * temp_max/p95/mean show the temperature distribution.
+#   * hot_ratio is the fraction of pixels above safe_temp_max (hot spots vs wide hot area).
+#   * thermal_ok/mode/npts indicates confidence in the projection.
+# - If all candidates look unsafe or unreliable, set allow=false.
+
+# Allowed labels:
+# {allowed_labels}
+
+# Output STRICT JSON only:
+# {{
+#   "allow": true/false,
+#   "food_label": "<one of allowed labels or null>",
+#   "reason": "<short English reason>"
+# }}
+# """
+#     try:
+#         resp = client.chat.completions.create(
+#             model="gpt-4o",
+#             messages=[{"role": "user", "content": prompt}],
+#             max_tokens=250,
+#             temperature=0,
+#         )
+#         content = (resp.choices[0].message.content or "")
+#         print("LLM raw repr:", repr(content))
+#         content = content.strip()
+#         return json.loads(resp.choices[0].message.content)
+#     except Exception as e:
+#         print("⚠ LLM planning failed:", e)
+#         return {"allow": False, "food_label": None, "reason": "LLM_error"}
+
 def decide_next_label_with_thermal_llm_A(
     client: OpenAI,
     per_label_best: Dict[str, Dict[str, Any]],
     history: list,
     safe_temp_max: float,
 ) -> Dict[str, Any]:
-    """
-    A案：LLM 1回で
-      - 次に食べるラベル選択
-      - 食べて良いか(allow)
-    をまとめて決める
-    """
     from collections import Counter
+    import json, re
+
     counts = dict(Counter(history))
     last = history[-1] if history else None
 
-    # LLMに渡す情報（no_thermalのsummaryを拡張）
     summary = []
     for lbl, rec in per_label_best.items():
         th = rec.get("thermal", {})
@@ -572,8 +658,6 @@ You must decide:
 1) whether the robot should feed now (allow)
 2) if allow=true, choose exactly ONE food_label from the allowed list
 
-You are given per-label best RGB candidates + thermal statistics.
-
 Candidates (JSON list):
 {json.dumps(summary, ensure_ascii=False)}
 
@@ -581,17 +665,7 @@ Eating history: {history}
 Counts: {counts}
 Last eaten: {last}
 
-Thermal safety reference (NOT a hard-coded rule, but a key safety indicator):
 safe_temp_max = {safe_temp_max:.1f} °C
-
-Guidance:
-- Prefer higher RGB score (more reliable detection).
-- Prefer variety (avoid repeating the same label too many times).
-- Use thermal stats responsibly:
-  * temp_max/p95/mean show the temperature distribution.
-  * hot_ratio is the fraction of pixels above safe_temp_max (hot spots vs wide hot area).
-  * thermal_ok/mode/npts indicates confidence in the projection.
-- If all candidates look unsafe or unreliable, set allow=false.
 
 Allowed labels:
 {allowed_labels}
@@ -603,17 +677,47 @@ Output STRICT JSON only:
   "reason": "<short English reason>"
 }}
 """
+
     try:
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=250,
             temperature=0,
         )
-        return json.loads(resp.choices[0].message.content)
+
+        raw = (resp.choices[0].message.content or "")
+        print("LLM raw repr:", repr(raw))
+
+        content = raw.strip()
+
+        # 1) ```json ... ``` を剥がす（``` だけの場合も対応）
+        content = re.sub(r"^```(?:json)?\s*", "", content, flags=re.IGNORECASE)
+        content = re.sub(r"\s*```$", "", content)
+
+        # 2) 念のため、最初の { から最後の } だけを抜く（前置き対策）
+        m = re.search(r"\{.*\}", content, flags=re.DOTALL)
+        if not m:
+            raise ValueError(f"No JSON object found. raw={raw!r}")
+
+        data = json.loads(m.group(0))
+
+        # 3) 返り値の形を最低限整える（保険）
+        if not isinstance(data, dict):
+            raise ValueError("LLM output is not a JSON object")
+        if "allow" not in data:
+            data["allow"] = False
+        if "food_label" not in data:
+            data["food_label"] = None
+        if "reason" not in data:
+            data["reason"] = "no_reason"
+
+        return data
+
     except Exception as e:
         print("⚠ LLM planning failed:", e)
         return {"allow": False, "food_label": None, "reason": "LLM_error"}
+
 
 def make_thermal_debug_view(thermal_data: np.ndarray) -> np.ndarray:
     """
@@ -666,7 +770,7 @@ def move_robot_to_food(
     if P_base is not None:
         # mm 単位に変換
         x_mm, y_mm, z_mm = x_b * 1000 - 240, y_b * 1000, 210
-        error = 15
+        error = 13
         CheckIfNewPositionInWorkspace(x_mm, y_mm, z_mm + 50)
         # アプローチ姿勢
         arm.set_position(
@@ -709,7 +813,7 @@ def move_food_to_mouth(arm:XArmAPI):
 
 
 def move_first_position(arm: XArmAPI):
-    arm.set_position(360, 40, 320, -90, 0, -90)
+    arm.set_position(360, -80, 320, -90, 0, -90)
     return
 
 
