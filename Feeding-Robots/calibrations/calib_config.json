@@ -10,5 +10,10 @@
         [-0.91330134, 0.15888117, -0.37501707, 0.45528391],
         [0.14649943, -0.73099346, -0.66647392, 0.74867888],
         [0.0, 0.0, 0.0, 1.0]
-    ]
+    ],
+    "thermal": {
+    "intrinsics_npz": "./out/pi160_intrinsics_live.npz",
+    "extrinsics_npz": "./out/pi160_to_realsense_extrinsics.npz",
+    "extrinsics_direction": "th2rgb"
+  }
 }

@@ -71,7 +71,7 @@ def load_calibration(path: str) -> Dict[str, Any]:
 
 
 def CheckIfNewPositionInWorkspace(x, y, z) -> bool:
-    if x > 500 or x < 300:
+    if x > 500 or x < 200:
         return False
     if y < -200 or y > 300:
         return False
@@ -153,7 +153,7 @@ Output strictly in JSON:
 """
     try:
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             messages=[
                 {"role": "user",
                  "content": [
@@ -286,7 +286,7 @@ Output STRICT JSON only:
 """
     try:
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=200,
             temperature=0,
@@ -354,7 +354,7 @@ def move_robot_to_food(arm: XArmAPI, center_px, depth_m: float, calib: Dict[str,
         roll=-135, pitch=0, yaw=-90,
         speed=50, mvacc=1000, wait=True
     )
-    error = 0
+    error = 15
 
     if not CheckIfNewPositionInWorkspace(x_mm, y_mm, z_mm):
         print("⚠ Workspace外（target）。移動中止。")

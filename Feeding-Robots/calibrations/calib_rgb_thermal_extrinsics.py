@@ -7,7 +7,7 @@ import numpy as np
 RGB_GLOB    = "./data/rgb/*.png"      # 同期したRGB画像（番号対応推奨）
 THERM_GLOB  = "./data/thermal/*.png"  # 同期したThermal画像
 PATTERN_SIZE = (11, 4)
-D_MM = 20.0
+D_MM = 18.0
 
 # 既知の内部パラメータ（RGBはRealSenseの既知値 or 別途キャリブ結果を入れる）
 RGB_INTRINSICS_NPZ   = "./out/realsense_intrinsics.npz"  # K, dist, img_size

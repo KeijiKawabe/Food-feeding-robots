@@ -1,0 +1,115 @@
+DEBUG [IRLogger.cpp:105] @ 0.0008263s :***************************************************
+DEBUG [IRLogger.cpp:106] @ 0.0010075s :* IRImagerDirect SDK                              *
+DEBUG [IRLogger.cpp:107] @ 0.0010567s :***************************************************
+DEBUG [IRLogger.cpp:113] @ 0.0010912s :* Native Machine:      AMD64
+DEBUG [IRLogger.cpp:114] @ 0.0011221s :* Machine:             AMD64
+DEBUG [IRLogger.cpp:116] @ 0.0011737s :* OS:                  Windows 10 0 26100
+DEBUG [IRLogger.cpp:123] @ 0.0012032s :***************************************************
+DEBUG [IRDeviceParams.cpp:204] @ 0.0060968s :Parameters
+DEBUG [IRDeviceParams.cpp:205] @ 0.0061643s :serial: 14110095
+DEBUG [IRDeviceParams.cpp:206] @ 0.0061862s :videoformatindex: 0
+DEBUG [IRDeviceParams.cpp:207] @ 0.0062054s :fov: 0
+DEBUG [IRDeviceParams.cpp:208] @ 0.0062259s :optics_text: 0000000000000000
+DEBUG [IRDeviceParams.cpp:209] @ 0.006246s :formatspath: 00000201C19A5500
+DEBUG [IRDeviceParams.cpp:210] @ 0.0062695s :calipath: 00000201C19FC340
+DEBUG [IRDeviceParams.cpp:211] @ 0.0062964s :temperature min: 0
+DEBUG [IRDeviceParams.cpp:212] @ 0.0063199s :temperature max: 0
+DEBUG [IRDeviceParams.cpp:213] @ 0.0063407s :framerate: 32
+DEBUG [IRDeviceParams.cpp:214] @ 0.0063601s :bispectral: 0
+DEBUG [IRDeviceParams.cpp:215] @ 0.0063782s :flag automatic: 1
+DEBUG [IRDeviceParams.cpp:216] @ 0.006397s :min interval: 15
+DEBUG [IRDeviceParams.cpp:217] @ 0.0064163s :max interval: 0
+DEBUG [IRDeviceParams.cpp:218] @ 0.0064349s :chip heating mode: 0
+DEBUG [IRDeviceParams.cpp:219] @ 0.0064546s :chip heating fixed val: 40
+DEBUG [IRDeviceParams.cpp:220] @ 0.0064743s :focus:  -1
+DEBUG [IRDeviceParams.cpp:221] @ 0.0065009s :enable extended temp range: 0
+DEBUG [IRDeviceParams.cpp:222] @ 0.0065204s :buffer queue size: 5
+DEBUG [IRDeviceParams.cpp:223] @ 0.0065389s :enable high precision: 0
+DEBUG [IRDeviceParams.cpp:224] @ 0.0065582s :radialDistortionCorrectionMode: 0
+DEBUG [IRDeviceParams.cpp:225] @ 0.0065767s :deviceAPI: 0
+DEBUG [IRDeviceParams.cpp:226] @ 0.0065961s :useExternalProbeForReferencing: 0
+DEBUG [IRDeviceParams.cpp:227] @ 0.0066143s :enableMultiThreading: 0
+DEBUG [IRDeviceParams.cpp:232] @ 0.0066371s :ethernetDevice.deviceIpAddress: 0.0.0.0
+DEBUG [IRDeviceParams.cpp:233] @ 0.0066558s :ethernetDevice.localUdpPort: 0
+DEBUG [IRDeviceParams.cpp:234] @ 0.0066745s :ethernetDevice.checkUdpSenderIp: 1
+DEBUG [Cali.cpp:87] @ 0.716623s :Calibration directory path: .\Cali-14110095.xml
+DEBUG [Cali.cpp:88] @ 0.716675s :Calibration file name: Cali-14110095.xml
+DEBUG [Cali.cpp:98] @ 0.718921s :Calibration data A: 1450 B:400 C:4095 D:1000
+INFO [IRImager.cpp:266] @ 1.17513s :Init thermal imager to 14110095 with size: 160x121@120 Hz
+DEBUG [Cali.cpp:87] @ 1.17675s :Calibration directory path: .\Cali-14110095.xml
+DEBUG [Cali.cpp:88] @ 1.17679s :Calibration file name: Cali-14110095.xml
+DEBUG [Cali.cpp:98] @ 1.17758s :Calibration data A: 1450 B:400 C:4095 D:1000
+DEBUG [Cali.cpp:87] @ 1.18007s :Calibration directory path: .\Cali-14110095.xml
+DEBUG [Cali.cpp:88] @ 1.18013s :Calibration file name: Cali-14110095.xml
+DEBUG [Cali.cpp:98] @ 1.18093s :Calibration data A: 1450 B:400 C:4095 D:1000
+DEBUG [IRImager.cpp:300] @ 1.18109s :No temperature range configuration specified. Setting default values tMin: -20 , tMax: 100
+DEBUG [IRImager.cpp:377] @ 1.20254s :Using HID control interface
+DEBUG [IRImager.cpp:417] @ 1.21663s :Initialized HID control interface to device with HW:21 FW:2025
+DEBUG [IRImager.cpp:438] @ 1.21695s :Frameconfig - width(in): 160, height(in): 121, interval: 83333, max framerate: 120, HW interval: 0.00833333
+DEBUG [Cali.cpp:87] @ 1.21719s :Calibration directory path: .\Cali-14110095.xml
+DEBUG [Cali.cpp:88] @ 1.21729s :Calibration file name: Cali-14110095.xml
+DEBUG [Cali.cpp:98] @ 1.21949s :Calibration data A: 1450 B:400 C:4095 D:1000
+DEBUG [ImageProcessing.cpp:200] @ 1.22987s :Source buffer size: 38720 Width: 160 Height: 121
+DEBUG [ImageProcessing.cpp:121] @ 1.30149s :Source buffer size: 38720 Width: 160 Height: 121
+DEBUG [OpSource.cpp:376] @ 1.3021s :Using formats path: C:\Program Files (x86)\Optris GmbH\IrDirectSDK\examples\matlab\Formats.def
+DEBUG [OpSource.cpp:628] @ 1.30328s :Format found with size: 160
+DEBUG [OpSource.cpp:791] @ 1.30351s :Selected Format:"PI160 160x120 @ 120Hz"
+DEBUG [IRImager.cpp:844] @ 1.30417s :Caught onFrameInit with size: 160x120
+DEBUG [OpSource.cpp:376] @ 1.30509s :Using formats path: C:\Program Files (x86)\Optris GmbH\IrDirectSDK\examples\matlab\Formats.def
+DEBUG [OpSource.cpp:628] @ 1.30522s :Format found with size: 160
+DEBUG [OpSource.cpp:376] @ 1.30537s :Using formats path: C:\Program Files (x86)\Optris GmbH\IrDirectSDK\examples\matlab\Formats.def
+DEBUG [OpCorr.cpp:467] @ 1.30935s :Read cali: .\Cali-14110095.xml\Cali-14110095-48-M20-100.dat
+DEBUG [OpCorr.cpp:557] @ 1.30961s :Read calibration of camera no 14110095, # of fields: 6 , start of fields: 40
+DEBUG [ImageProcessing.cpp:1108] @ 1.6244s :Update flag temperature: 34.0781
+DEBUG [ImageProcessing.cpp:1111] @ 1.63149s :Update box temperature: 32.2422
+DEBUG [Cali.cpp:639] @ 1.63153s :Calibration file path: 00000201C2D3CEC4/000000052F1ECA38.xml
+DEBUG [SimpleXML.cpp:238] @ 1.63177s :Failed to open file .\Cali-14110095.xml\CaliExt-14110095.xml
+DEBUG [IRImager.cpp:550] @ 1.64318s :Chip heating disabled
+DEBUG [IRImager.cpp:1110] @ 1.7151s :Start flag calibration
+DEBUG [OpFlag.cpp:591] @ 12.3854s :SkimDiff: -7 Adjust: -647 State: 1 EMax: 9053 Emin: 2757
+DEBUG [ImageProcessing.cpp:526] @ 12.3969s :Skim_Adjust 4025
+DEBUG [IRImager.cpp:1124] @ 12.5135s :Finished startup calibration
+DEBUG [IRImager.cpp:1175] @ 27.2331s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 27.3945s :SkimDiff: -7 Adjust: -621 State: 1 EMax: 9099 Emin: 2783
+DEBUG [ImageProcessing.cpp:526] @ 27.4072s :Skim_Adjust 4024
+DEBUG [IRImager.cpp:1175] @ 42.2419s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 42.403s :SkimDiff: -6 Adjust: -572 State: 1 EMax: 9147 Emin: 2832
+DEBUG [ImageProcessing.cpp:526] @ 42.4162s :Skim_Adjust 4023
+DEBUG [IRImager.cpp:1175] @ 60.6586s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 60.8195s :SkimDiff: -6 Adjust: -523 State: 1 EMax: 9217 Emin: 2881
+DEBUG [ImageProcessing.cpp:526] @ 60.8326s :Skim_Adjust 4022
+DEBUG [IRImager.cpp:1175] @ 92.7057s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 92.8666s :SkimDiff: -5 Adjust: -467 State: 1 EMax: 9287 Emin: 2937
+DEBUG [ImageProcessing.cpp:526] @ 92.8794s :Skim_Adjust 4021
+DEBUG [IRImager.cpp:1175] @ 152.419s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 152.61s :SkimDiff: -5 Adjust: -405 State: 1 EMax: 9350 Emin: 2999
+DEBUG [ImageProcessing.cpp:526] @ 152.623s :Skim_Adjust 4020
+DEBUG [IRImager.cpp:1175] @ 203.826s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 204.004s :SkimDiff: -4 Adjust: -348 State: 1 EMax: 9412 Emin: 3056
+DEBUG [ImageProcessing.cpp:526] @ 204.017s :Skim_Adjust 4019
+ERROR [DirectBridgeClientUSB.cpp:302] @ 695.389s :Timeout exceeded - No data recieved the last second
+ERROR [DirectBridgeClientUSB.cpp:302] @ 696.499s :Timeout exceeded - No data recieved the last second
+ERROR [DirectBridgeClientUSB.cpp:354] @ 697.509s :Timeout exceeded - No data recieved the last second
+ERROR [DirectBridgeClientUSB.cpp:354] @ 698.511s :Timeout exceeded - No data recieved the last second
+ERROR [DirectBridgeClientUSB.cpp:302] @ 699.525s :Timeout exceeded - No data recieved the last second
+ERROR [DirectBridgeClientUSB.cpp:302] @ 700.639s :Timeout exceeded - No data recieved the last second
+ERROR [DirectBridgeClientUSB.cpp:354] @ 701.643s :Timeout exceeded - No data recieved the last second
+ERROR [DirectBridgeClientUSB.cpp:354] @ 702.666s :Timeout exceeded - No data recieved the last second
+ERROR [DirectBridgeClientUSB.cpp:302] @ 703.666s :Timeout exceeded - No data recieved the last second
+ERROR [DirectBridgeClientUSB.cpp:302] @ 704.773s :Timeout exceeded - No data recieved the last second
+ERROR [DirectBridgeClientUSB.cpp:354] @ 705.787s :Timeout exceeded - No data recieved the last second
+ERROR [DirectBridgeClientUSB.cpp:354] @ 706.802s :Timeout exceeded - No data recieved the last second
+ERROR [DirectBridgeClientUSB.cpp:302] @ 707.817s :Timeout exceeded - No data recieved the last second
+ERROR [DirectBridgeClientUSB.cpp:302] @ 708.926s :Timeout exceeded - No data recieved the last second
+ERROR [DirectBridgeClientUSB.cpp:354] @ 709.939s :Timeout exceeded - No data recieved the last second
+ERROR [DirectBridgeClientUSB.cpp:354] @ 710.954s :Timeout exceeded - No data recieved the last second
+ERROR [DirectBridgeClientUSB.cpp:302] @ 711.956s :Timeout exceeded - No data recieved the last second
+ERROR [DirectBridgeClientUSB.cpp:302] @ 713.078s :Timeout exceeded - No data recieved the last second
+DEBUG [IRImager.cpp:665] @ 713.093s :Release imager
+DEBUG [BaseControlDevice.cpp:26] @ 713.125s :Base destructor called
+DEBUG [IRImager.cpp:672] @ 713.125s :Delete image processing
+DEBUG [IRImager.cpp:679] @ 713.143s :Delete buffer
+DEBUG [IRImager.cpp:687] @ 713.143s :Delete source buffer
+DEBUG [IRImager.cpp:694] @ 713.143s :Delete buffer (energy)
+DEBUG [IRImager.cpp:701] @ 713.143s :Delete timer
+DEBUG [IRImager.cpp:707] @ 713.144s :Delete manual timer
