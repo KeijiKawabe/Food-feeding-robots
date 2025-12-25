@@ -585,7 +585,6 @@ Thermal safety reference (NOT a hard-coded rule, but a key safety indicator):
 safe_temp_max = {safe_temp_max:.1f} °C
 
 Guidance:
-- Prefer higher RGB score (more reliable detection).
 - Prefer variety (avoid repeating the same label too many times).
 - Use thermal stats responsibly:
   * temp_max/p95/mean show the temperature distribution.
@@ -721,7 +720,6 @@ def move_first_position(arm: XArmAPI):
 # ==============================
 
 def main():
-        # === 計測開始（Enter押してこの周が始まった瞬間）===
     t_program_start = time.perf_counter()  # ★全体計測 start
     print("=== Meal-Assistance Robot Main ===")
     print("Project root:", PROJECT_ROOT)
@@ -954,9 +952,6 @@ def main():
             pass
 
         print("✓ 全てクリーンアップしました。")
-                # ★全体計測 end
-        t_program_end = time.perf_counter()
-        print(f"[TIME] total_program_time (incl waitKey) = {t_program_end - t_program_start:.3f} sec")
 
 
 if __name__ == "__main__":
