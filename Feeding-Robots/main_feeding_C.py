@@ -82,7 +82,7 @@ def load_calibration(path: str) -> Dict[str, Any]:
 
 
 def CheckIfNewPositionInWorkspace(x, y, z) -> bool:
-    if x > 500 or x < 300:
+    if x > 500 or x < 200:
         return False
     if y < -200 or y > 300:
         return False
@@ -323,7 +323,6 @@ def move_robot_to_food(arm: XArmAPI, center_px, depth_m: float, calib: Dict[str,
         print("⚠ Workspace外（approach）。移動中止。")
         move_first_position(arm=arm)
         return
-
     # arm.set_position(
     #     x_mm, y_mm, z_mm + 50,
     #     roll=135, pitch=0, yaw=90,
@@ -334,7 +333,7 @@ def move_robot_to_food(arm: XArmAPI, center_px, depth_m: float, calib: Dict[str,
         roll=-135, pitch=0, yaw=-90,
         speed=50, mvacc=1000, wait=True
     )
-    error = 13
+    error = 15
     #error = 4
 
     if not CheckIfNewPositionInWorkspace(x_mm, y_mm, z_mm):
@@ -374,6 +373,7 @@ def move_first_position(arm: XArmAPI):
 
 
 def main():
+    t_program_start = time.perf_counter()  # ★全体計測 start
     print("=== Meal-Assistance Robot Main (Condition B: No Thermal / RANDOM chooses label) ===")
     print("Project root:", PROJECT_ROOT)
 
@@ -591,6 +591,9 @@ def main():
         except Exception:
             pass
         print("✓ 全てクリーンアップしました。")
+                # ★全体計測 end
+        t_program_end = time.perf_counter()
+        print(f"[TIME] total_program_time (incl waitKey) = {t_program_end - t_program_start:.3f} sec")
 
 
 if __name__ == "__main__":

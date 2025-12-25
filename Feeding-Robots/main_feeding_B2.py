@@ -256,6 +256,49 @@ def build_manual_clip_prompts() -> Dict[str, Any]:
         ],
     }
 
+def hard_thermal_safety_check(
+    rec: Dict[str, Any],
+    safe_temp_max: float,
+    hot_ratio_max: float = 0.10,   # 「閾値超え画素が5%以下ならOK」など
+    require_project: bool = False, # Trueにすると fallback_scale は除外
+    min_npts: int = 15,            # 投影点が少ない候補を除外（project時のみ意味あり）
+    max = 65,
+) -> Tuple[bool, str]:
+    """
+    候補recが「温度的に安全」かをハード判定する。
+    戻り: (safe, reason)
+    """
+    th = rec.get("thermal", {})
+    if not th.get("ok", False):
+        return False, "thermal not available"
+
+    mode = th.get("mode", None)
+    npts = int(th.get("npts", 0))
+
+    if require_project and mode != "project":
+        return False, f"mode={mode} rejected"
+
+    if mode == "project" and npts < min_npts:
+        return False, f"too few projected points (npts={npts})"
+
+    p95 = th.get("p95", None)
+    hot_ratio = th.get("hot_ratio", None)
+    tmax = th.get("max", None)
+    if tmax is not None and float(tmax) >= safe_temp_max + 10.0:
+        return False, f"tmax={tmax:.1f} >= safe+10"
+
+
+    if p95 is None or hot_ratio is None:
+        return False, "missing p95/hot_ratio"
+
+    # ハード判定（ここをあなたの安全基準に合わせて調整）
+    # if float(p95) > safe_temp_max:
+    #     return False, f"p95={p95:.1f} > safe={safe_temp_max:.1f}"
+    if float(hot_ratio) > hot_ratio_max:
+        return False, f"hot_ratio={hot_ratio:.2f} > {hot_ratio_max:.2f}"
+
+    return True, "safe"
+
 
 def build_clip_prompts_with_gpt(client: OpenAI, color_image: np.ndarray) -> Dict[str, Any]:
     """
@@ -585,7 +628,6 @@ def attach_thermal_to_per_label_best(
 # safe_temp_max = {safe_temp_max:.1f} °C
 
 # Guidance:
-# - Prefer higher RGB score (more reliable detection).
 # - Prefer variety (avoid repeating the same label too many times).
 # - Use thermal stats responsibly:
 #   * temp_max/p95/mean show the temperature distribution.
@@ -605,118 +647,90 @@ def attach_thermal_to_per_label_best(
 # """
 #     try:
 #         resp = client.chat.completions.create(
-#             model="gpt-4o",
+#             model="gpt-4o-mini",
 #             messages=[{"role": "user", "content": prompt}],
 #             max_tokens=250,
 #             temperature=0,
 #         )
-#         content = (resp.choices[0].message.content or "")
-#         print("LLM raw repr:", repr(content))
-#         content = content.strip()
 #         return json.loads(resp.choices[0].message.content)
 #     except Exception as e:
 #         print("⚠ LLM planning failed:", e)
 #         return {"allow": False, "food_label": None, "reason": "LLM_error"}
 
-def decide_next_label_with_thermal_llm_A(
+def choose_label_llm_from_safe(
     client: OpenAI,
-    per_label_best: Dict[str, Dict[str, Any]],
+    safe_candidates: Dict[str, Dict[str, Any]],
     history: list,
-    safe_temp_max: float,
 ) -> Dict[str, Any]:
+    """
+    safe_candidates の中から次の food_label を1つ選ぶだけ（allowは扱わない）
+    戻り: {"food_label": "...", "reason": "..."}
+    """
     from collections import Counter
-    import json, re
-
     counts = dict(Counter(history))
     last = history[-1] if history else None
 
     summary = []
-    for lbl, rec in per_label_best.items():
+    for lbl, rec in safe_candidates.items():
         th = rec.get("thermal", {})
         summary.append({
             "label": lbl,
             "score": float(rec.get("score", 0.0)),
-            "center_px": rec.get("center_px"),
-            "depth_m": rec.get("depth_m"),
-            "thermal_ok": bool(th.get("ok", False)),
-            "thermal_mode": th.get("mode", None),
-            "thermal_npts": th.get("npts", 0),
-            "temp_min": th.get("min", None),
             "temp_mean": th.get("mean", None),
             "temp_p95": th.get("p95", None),
-            "temp_max": th.get("max", None),
             "hot_ratio": th.get("hot_ratio", None),
         })
     summary.sort(key=lambda x: x["score"], reverse=True)
-
-    allowed_labels = list(per_label_best.keys())
+    allowed_labels = list(safe_candidates.keys())
 
     prompt = f"""
 You are a task planner for a meal-assistance robot.
-
-You must decide:
-1) whether the robot should feed now (allow)
-2) if allow=true, choose exactly ONE food_label from the allowed list
+All candidates below are already verified SAFE by hard thermal rules.
+Your job is ONLY to choose the next food_label (one of allowed labels),
+prioritizing:
+- higher RGB score
+- variety (avoid repeating last too much)
+- keep reasoning short
 
 Candidates (JSON list):
 {json.dumps(summary, ensure_ascii=False)}
 
-Eating history: {history}
+History: {history}
 Counts: {counts}
-Last eaten: {last}
-
-safe_temp_max = {safe_temp_max:.1f} °C
+Last: {last}
 
 Allowed labels:
 {allowed_labels}
 
 Output STRICT JSON only:
 {{
-  "allow": true/false,
-  "food_label": "<one of allowed labels or null>",
+  "food_label": "<one of allowed labels>",
   "reason": "<short English reason>"
 }}
 """
+    # ★JSON強制（ここがLLM_error対策として効きます）
+    schema = {
+        "name": "choose_label",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "food_label": {"type": "string", "enum": allowed_labels},
+                "reason": {"type": "string"},
+            },
+            "required": ["food_label", "reason"],
+            "additionalProperties": False
+        }
+    }
 
-    try:
-        resp = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=250,
-            temperature=0,
-        )
-
-        raw = (resp.choices[0].message.content or "")
-        print("LLM raw repr:", repr(raw))
-
-        content = raw.strip()
-
-        # 1) ```json ... ``` を剥がす（``` だけの場合も対応）
-        content = re.sub(r"^```(?:json)?\s*", "", content, flags=re.IGNORECASE)
-        content = re.sub(r"\s*```$", "", content)
-
-        # 2) 念のため、最初の { から最後の } だけを抜く（前置き対策）
-        m = re.search(r"\{.*\}", content, flags=re.DOTALL)
-        if not m:
-            raise ValueError(f"No JSON object found. raw={raw!r}")
-
-        data = json.loads(m.group(0))
-
-        # 3) 返り値の形を最低限整える（保険）
-        if not isinstance(data, dict):
-            raise ValueError("LLM output is not a JSON object")
-        if "allow" not in data:
-            data["allow"] = False
-        if "food_label" not in data:
-            data["food_label"] = None
-        if "reason" not in data:
-            data["reason"] = "no_reason"
-
-        return data
-
-    except Exception as e:
-        print("⚠ LLM planning failed:", e)
-        return {"allow": False, "food_label": None, "reason": "LLM_error"}
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_schema", "json_schema": schema},
+        max_tokens=120,
+        temperature=0,
+    )
+    return json.loads(resp.choices[0].message.content)
 
 
 def make_thermal_debug_view(thermal_data: np.ndarray) -> np.ndarray:
@@ -770,7 +784,7 @@ def move_robot_to_food(
     if P_base is not None:
         # mm 単位に変換
         x_mm, y_mm, z_mm = x_b * 1000 - 240, y_b * 1000, 210
-        error = 13
+        error = 15
         CheckIfNewPositionInWorkspace(x_mm, y_mm, z_mm + 50)
         # アプローチ姿勢
         arm.set_position(
@@ -813,7 +827,7 @@ def move_food_to_mouth(arm:XArmAPI):
 
 
 def move_first_position(arm: XArmAPI):
-    arm.set_position(360, -80, 320, -90, 0, -90)
+    arm.set_position(360, 40, 320, -90, 0, -90)
     return
 
 
@@ -951,26 +965,53 @@ def main():
                 sample_step=8,
             )
 
-            # 4) LLM 1回で allow + chosen_label
-            decision = decide_next_label_with_thermal_llm_A(
-                client=client,
-                per_label_best=per_label_best,
-                history=eat_history,
-                safe_temp_max=SAFE_TEMP_MAX,
-            )
-            allow = decision.get("allow", False)
-            chosen_label = decision.get("food_label", None)
-            reason = decision.get("reason", "")
-            print("\n--- LLM Decision (A: choose label + allow) ---")
+            # ---- ハード安全フィルタ：安全候補だけ残す ----
+            safe_candidates = {}
+            unsafe_reasons = {}
+
+            for lbl, rec in per_label_best.items():
+                safe, why = hard_thermal_safety_check(
+                    rec,
+                    safe_temp_max=SAFE_TEMP_MAX,
+                    hot_ratio_max=0.10,
+                    require_project=False,  # 安全寄りなら True
+                    min_npts=15,
+                    max = 70
+                )
+                rec.setdefault("thermal", {})["hard_safe"] = safe
+                rec["thermal"]["hard_safe_reason"] = why
+
+                if safe:
+                    safe_candidates[lbl] = rec
+                else:
+                    unsafe_reasons[lbl] = why
+
+            print("[HARD SAFETY] unsafe excluded:", unsafe_reasons)
+            print("[HARD SAFETY] safe labels:", list(safe_candidates.keys()))
+
+            if len(safe_candidates) == 0:
+                print("⚠ 安全な候補が無いので停止（全候補が高温/不確実）")
+                continue
+            # =========================
+            # 5) HARD+LLM Decision（ここが質問のブロック）
+            # =========================
+            try:
+                sel = choose_label_llm_from_safe(client, safe_candidates, eat_history)
+                chosen_label = sel["food_label"]
+                reason = sel["reason"]
+            except Exception as e:
+                print("⚠ choose_label_llm_from_safe failed:", e)
+                chosen_label = max(safe_candidates.items(), key=lambda kv: kv[1].get("score", 0.0))[0]
+                reason = "fallback: choose highest RGB score among safe candidates"
+
+            allow = True  # safe_candidatesがある時点で True
+            print("\n--- HARD+LLM Decision ---")
             print("allow      :", allow)
             print("food_label :", chosen_label)
             print("reason     :", reason)
 
-            if not allow or not chosen_label or chosen_label not in per_label_best:
-                print("⚠ skip")
-                continue
-
-            chosen = per_label_best[chosen_label]
+            # ここから先は chosen を「safe_candidates」から取る（重要）
+            chosen = safe_candidates[chosen_label]
             bbox = chosen["bbox"]
             center_px = chosen["center_px"]
             depth_m = chosen["depth_m"]

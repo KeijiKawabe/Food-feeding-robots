@@ -286,7 +286,7 @@ Output STRICT JSON only:
 """
     try:
         resp = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=200,
             temperature=0,
@@ -605,6 +605,9 @@ def main():
         except Exception:
             pass
         print("✓ 全てクリーンアップしました。")
+                # ★全体計測 end
+        t_program_end = time.perf_counter()
+        print(f"[TIME] total_program_time (incl waitKey) = {t_program_end - t_program_start:.3f} sec")
 
 
 if __name__ == "__main__":
