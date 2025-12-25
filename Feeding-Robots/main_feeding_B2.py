@@ -71,7 +71,7 @@ SAM2_CKPT = os.path.join(
 PROMPT_MODE = "manual"
 
 # Thermal 側の安全温度しきい値（例：65℃）
-SAFE_TEMP_MAX = 55
+SAFE_TEMP_MAX = 50
 
 
 # ==============================
@@ -554,7 +554,7 @@ def attach_thermal_to_per_label_best(
         tmean = float(np.mean(r))
         p95 = float(np.percentile(r, 95))
         # “しきい値以上の割合” を特徴量として渡す（閾値で弾くのではなく）
-        safe = float(calib.get("safe_temp_max", 55.0))  # 後で main で入れると楽
+        safe = float(calib.get("safe_temp_max", 50))  # 後で main で入れると楽
         hot_ratio = float(np.mean(r > safe))
 
         rec["thermal"] = {
