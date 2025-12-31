@@ -71,7 +71,7 @@ SAM2_CKPT = os.path.join(
 PROMPT_MODE = "manual"
 
 # Thermal 側の安全温度しきい値（例：65℃）
-SAFE_TEMP_MAX = 55
+SAFE_TEMP_MAX = 50
 
 
 # ==============================
@@ -222,9 +222,9 @@ def init_realsense() -> rs.pipeline:
     return pipeline
 
 def CheckIfNewPositionInWorkspace(x,y,z):
-    if x > 500  or x < 200:
+    if x > 500  or x < 250:
         return False
-    if y < -200 or y > 300:
+    if y < -200 or y > 200:
         return False
     if z < 94 or z > 400:
         return False
@@ -554,7 +554,7 @@ def attach_thermal_to_per_label_best(
         tmean = float(np.mean(r))
         p95 = float(np.percentile(r, 95))
         # “しきい値以上の割合” を特徴量として渡す（閾値で弾くのではなく）
-        safe = float(calib.get("safe_temp_max", 55))  # 後で main で入れると楽
+        safe = float(calib.get("safe_temp_max", 50))  # 後で main で入れると楽
         hot_ratio = float(np.mean(r > safe))
 
         rec["thermal"] = {
@@ -570,135 +570,103 @@ def attach_thermal_to_per_label_best(
 
 
 
-# def choose_label_llm_from_safe(
-#     client: OpenAI,
-#     safe_candidates: Dict[str, Dict[str, Any]],
-#     history: list,
-# ) -> Dict[str, Any]:
-#     """
-#     safe_candidates の中から次の food_label を1つ選ぶだけ（allowは扱わない）
-#     戻り: {"food_label": "...", "reason": "..."}
-#     """
-#     from collections import Counter
-#     counts = dict(Counter(history))
-#     last = history[-1] if history else None
-
-#     summary = []
-#     for lbl, rec in safe_candidates.items():
-#         th = rec.get("thermal", {})
-#         summary.append({
-#             "label": lbl,
-#             "score": float(rec.get("score", 0.0)),
-#             "temp_mean": th.get("mean", None),
-#             "temp_p95": th.get("p95", None),
-#             "hot_ratio": th.get("hot_ratio", None),
-#         })
-#     summary.sort(key=lambda x: x["score"], reverse=True)
-#     allowed_labels = list(safe_candidates.keys())
-
-#     prompt = f"""
-# You are a task planner for a meal-assistance robot.
-# All candidates below are already verified SAFE by hard thermal rules.
-# Your job is ONLY to choose the next food_label (one of allowed labels),
-# prioritizing:
-# - higher RGB score
-# - variety (avoid repeating last too much)
-# - keep reasoning short
-
-# Candidates (JSON list):
-# {json.dumps(summary, ensure_ascii=False)}
-
-# History: {history}
-# Counts: {counts}
-# Last: {last}
-
-# Allowed labels:
-# {allowed_labels}
-
-# Output STRICT JSON only:
-# {{
-#   "food_label": "<one of allowed labels>",
-#   "reason": "<short English reason>"
-# }}
-# """
-#     # ★JSON強制（ここがLLM_error対策として効きます）
-#     schema = {
-#         "name": "choose_label",
-#         "strict": True,
-#         "schema": {
-#             "type": "object",
-#             "properties": {
-#                 "food_label": {"type": "string", "enum": allowed_labels},
-#                 "reason": {"type": "string"},
-#             },
-#             "required": ["food_label", "reason"],
-#             "additionalProperties": False
-#         }
-#     }
-
-
-    # resp = client.chat.completions.create(
-    #     model="gpt-4o-mini",
-    #     messages=[{"role": "user", "content": prompt}],
-    #     response_format={"type": "json_schema", "json_schema": schema},
-    #     max_tokens=120,
-    #     temperature=0,
-    # )
-    # return json.loads(resp.choices[0].message.content)
-
-
 import json
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional, Tuple
 from openai import OpenAI
 
-def choose_label_llm_from_safe(
+def choose_label_llm_grouped_2to3(
     client: OpenAI,
     safe_candidates: Dict[str, Dict[str, Any]],
-    history: list,
+    history: List[Dict[str, Any]],
+    close_thr_c: float = 3.0,
+    target_streak: int = 3,
+    switch_min_delta_c: float = 4.0,   # ★切替は最低これくらい離れてほしい（なければ緩和）
+    cold_thr: float = 25.0,
+    hot_thr: float = 35.0,             # ★今回の温度帯だと40は高すぎる可能性大
 ) -> Dict[str, Any]:
-    from collections import Counter
 
     if not safe_candidates:
-        # 候補ゼロはLLMに投げない（enumが空になるので）
-        return {"food_label": None, "reason": "no safe candidates"}  # 好きに
+        return {"food_label": None, "reason": "no safe candidates"}
 
-    counts = dict(Counter(history))
-    last = history[-1] if history else None
+    # last temp
+    last_temp = None
+    last_label = None
+    if history:
+        last_label = history[-1].get("label")
+        try:
+            last_temp = float(history[-1].get("temp_mean_c", None))
+        except Exception:
+            last_temp = None
 
-    summary = []
+    streak_len = compute_temp_streak_len_adjacent(history, close_thr_c=close_thr_c)
+
+    # build summary
+    items = []
     for lbl, rec in safe_candidates.items():
         th = rec.get("thermal", {}) or {}
-        summary.append({
+        t_mean = th.get("mean", None)
+        try:
+            t_mean = float(t_mean) if t_mean is not None else None
+        except Exception:
+            t_mean = None
+
+        delta = None
+        if last_temp is not None and t_mean is not None:
+            delta = abs(t_mean - last_temp)
+
+        items.append({
             "label": lbl,
-            "score": float(rec.get("score", 0.0)),
-            "temp_mean": th.get("mean", None),
-            "temp_p95": th.get("p95", None),
-            "hot_ratio": th.get("hot_ratio", None),
+            "temp_mean_c": t_mean,
+            "bucket": temp_bucket(t_mean, cold_thr=cold_thr, hot_thr=hot_thr) if t_mean is not None else "unknown",
+            "delta_to_last_c": delta,
         })
 
-    summary.sort(key=lambda x: x["score"], reverse=True)
-    allowed_labels = list(safe_candidates.keys())
+    allowed_all = [x["label"] for x in items]
 
+    # ---- ★ここが肝：切替フェーズなら “切替候補” だけに絞る ----
+    preferred = allowed_all
+    if last_temp is not None and streak_len >= target_streak:
+        last_bucket = temp_bucket(last_temp, cold_thr=cold_thr, hot_thr=hot_thr)
+
+        # まず bucket を変える候補（unknown除外）
+        switch_pool = [
+            x for x in items
+            if x["temp_mean_c"] is not None
+            and x["bucket"] != "unknown"
+            and x["bucket"] != last_bucket
+        ]
+
+        # さらに “十分離れてる” を優先
+        switch_pool2 = [x for x in switch_pool if x["delta_to_last_c"] is not None and x["delta_to_last_c"] >= switch_min_delta_c]
+
+        if switch_pool2:
+            preferred = [x["label"] for x in switch_pool2]
+        elif switch_pool:
+            preferred = [x["label"] for x in switch_pool]
+        else:
+            # 切替候補がないなら、せめて delta が大きい順で上位を優先
+            with_delta = [x for x in items if x["delta_to_last_c"] is not None]
+            with_delta.sort(key=lambda x: x["delta_to_last_c"], reverse=True)
+            if with_delta:
+                preferred = [x["label"] for x in with_delta[:2]]  # 上位2つだけに絞る（強いソフト）
+
+    # prompt
     prompt = f"""
 You are a task planner for a meal-assistance robot.
-All candidates below are already verified SAFE by hard thermal rules.
-Your job is ONLY to choose the next food_label (one of allowed labels),
-prioritizing:
-- temperature contrast (prefer larger difference from last bite)
-- alternation (hot -> cold, cold -> hot, but not as a hard rule)
-- variety (should not repeating last foods but your priority is alternation)
-- keep reasoning short
+All candidates are SAFE.
 
+We want temperature grouping: take similar temperature for about 2-3 picks.
+If streak_len >= {target_streak}, SWITCH temperature group (prefer a different bucket or larger delta).
+This is a strong preference.
 
-Candidates (JSON list):
-{json.dumps(summary, ensure_ascii=False)}
+Candidates:
+{json.dumps(items, ensure_ascii=False)}
 
-History: {history}
-Counts: {counts}
-Last: {last}
+History(last temp): {last_temp}
+Streak_len: {streak_len}
 
-Allowed labels:
-{allowed_labels}
+Allowed labels (you MUST pick one):
+{preferred}
 
 Output STRICT JSON only:
 {{
@@ -707,11 +675,11 @@ Output STRICT JSON only:
 }}
 """
 
-    # ★ json_schema（Structured Outputs）
+    # schema enum を preferred にする（ここで実質 “切替” を強制に近づける）
     schema = {
         "type": "object",
         "properties": {
-            "food_label": {"type": "string", "enum": allowed_labels},
+            "food_label": {"type": "string", "enum": preferred},
             "reason": {"type": "string"},
         },
         "required": ["food_label", "reason"],
@@ -720,25 +688,27 @@ Output STRICT JSON only:
 
     try:
         resp = client.responses.create(
-            model="gpt-4o-mini",  
+            model="gpt-4o-mini",
             input=[{"role": "user", "content": prompt}],
-            text={
-                "format": {
-                    "type": "json_schema",
-                    "name": "choose_label",
-                    "strict": True,
-                    "schema": schema,
-                }
-            },
+            text={"format": {"type": "json_schema", "name": "choose_label_grouped", "strict": True, "schema": schema}},
         )
-        # output_text はJSON文字列として返る想定
-        out = json.loads(resp.output_text)
-        return out
-
+        return json.loads(resp.output_text)
     except Exception as e:
-        # 最低限のフォールバック（例：スコア最大）
-        best = max(summary, key=lambda x: x["score"])
-        return {"food_label": best["label"], "reason": f"fallback due to error: {e.__class__.__name__}"}
+        # fallback：preferred 内からランダムではなく「目的に合う」選び方
+        # 切替フェーズなら delta最大、通常は delta最小
+        cand = [x for x in items if x["label"] in preferred]
+        if last_temp is not None:
+            if streak_len >= target_streak:
+                cand2 = [x for x in cand if x["delta_to_last_c"] is not None]
+                best = max(cand2, key=lambda x: x["delta_to_last_c"]) if cand2 else cand[0]
+            else:
+                cand2 = [x for x in cand if x["delta_to_last_c"] is not None]
+                best = min(cand2, key=lambda x: x["delta_to_last_c"]) if cand2 else cand[0]
+        else:
+            best = cand[0]
+        return {"food_label": best["label"], "reason": f"fallback ({e.__class__.__name__})"}
+
+
 
 
 
@@ -840,6 +810,60 @@ def move_first_position(arm: XArmAPI):
     arm.set_position(360, -100, 320, -90, 0, -90)
     return
 
+from typing import List, Dict, Any, Optional, Tuple
+import math
+
+def history_last_label_and_temp(history: List[Dict[str, Any]]) -> Tuple[Optional[str], Optional[float]]:
+    if not history:
+        return None, None
+    last = history[-1]
+    lbl = last.get("label", None)
+    t = last.get("temp_mean_c", None)
+    try:
+        t = float(t) if t is not None else None
+    except Exception:
+        t = None
+    return (lbl if isinstance(lbl, str) else None), t
+
+def temp_bucket(t_c: Optional[float], cold_thr: float = 25.0, hot_thr: float = 45.0) -> str:
+    """
+    cold: < cold_thr
+    warm: [cold_thr, hot_thr]
+    hot : > hot_thr
+    """
+    if t_c is None or (isinstance(t_c, float) and (math.isnan(t_c) or math.isinf(t_c))):
+        return "unknown"
+    elif t_c < cold_thr:
+        return "cold"
+    elif t_c <= hot_thr:
+        return "warm"
+    else:
+        return "hot"
+
+def compute_temp_streak_len_adjacent(history, close_thr_c=3.0) -> int:
+    temps = []
+    for h in history:
+        t = h.get("temp_mean_c", None)
+        try:
+            t = float(t) if t is not None else None
+        except Exception:
+            t = None
+        temps.append(t)
+
+    if not temps or temps[-1] is None:
+        return 0
+
+    streak = 1
+    for i in range(len(temps) - 1, 0, -1):
+        a = temps[i]
+        b = temps[i - 1]
+        if a is None or b is None:
+            break
+        if abs(a - b) <= close_thr_c:
+            streak += 1
+        else:
+            break
+    return streak
 
 
 
@@ -850,7 +874,6 @@ def move_first_position(arm: XArmAPI):
 
 def main():
         # === 計測開始（Enter押してこの周が始まった瞬間）===
-    times = 0
     t_program_start = time.perf_counter()  # ★全体計測 start
     print("=== Meal-Assistance Robot Main ===")
     print("Project root:", PROJECT_ROOT)
@@ -898,7 +921,7 @@ def main():
         device="cuda",
         maskgen_interval=1,
         min_area=1000,
-        max_area_frac=0.15,
+        max_area_frac=0.5,
         clip_model="ViT-B/32",
         clip_prompts=clip_prompts,
         enable_depth=True,
@@ -1007,7 +1030,13 @@ def main():
             # 5) HARD+LLM Decision（ここが質問のブロック）
             # =========================
             try:
-                sel = choose_label_llm_from_safe(client, safe_candidates, eat_history)
+                sel = choose_label_llm_grouped_2to3(
+                        client=client,
+                        safe_candidates=safe_candidates,
+                        history=eat_history,
+                        close_thr_c=3.0,
+                        target_streak=3,
+                )
                 chosen_label = sel["food_label"]
                 reason = sel["reason"]
             except Exception as e:
@@ -1049,9 +1078,19 @@ def main():
                 calib=calib,
                 label=chosen_label,
             )
+            chosen_th = chosen.get("thermal", {}) or {}
+            t_mean = chosen_th.get("mean", None)
+            try:
+                t_mean = float(t_mean) if t_mean is not None else None
+            except Exception:
+                t_mean = None
 
-            # 食事履歴更新
-            eat_history.append(chosen_label)
+            eat_history.append({
+                "label": chosen_label,
+                "temp_mean_c": t_mean,
+            })
+
+
 
             # --- デバッグ用に RGB+マスク+BBox を表示 ---
             vis = color_image.copy()
@@ -1065,8 +1104,6 @@ def main():
 
             cv2.imshow("Feeding Perception (RGB + SAM2 + CLIP)", vis)
             print("  → ウィンドウに RGB 認識結果を表示しました。何かキーを押すと閉じます。")
-            times += 1
-            print(str(times)+"回目の作業です。")
             cv2.waitKey(0)
             cv2.destroyAllWindows()
 
@@ -1115,7 +1152,6 @@ def main():
                 # ★全体計測 end
         t_program_end = time.perf_counter()
         print(f"[TIME] total_program_time (incl waitKey) = {t_program_end - t_program_start:.3f} sec")
-        print(eat_history)
 
 
 if __name__ == "__main__":

@@ -1,27 +1,28 @@
-# main_feeding_robot.py
+# main_feeding_A2_fixed.py
 """
-食事介助ロボット・メインスクリプト（v1）
+食事介助ロボット・メインスクリプト（v1 / 修正版）
 
-構成:
-- RealSense から RGB-D を取得
-- SAM2 + CLIP で食材のマスク / BBox / ラベルを推定
-- Thermal カメラから熱画像を取得
-- RGB BBox に対応する Thermal 領域の温度を計算
-- GPT に温度 & 食事履歴を渡して「次に食べるか」を判断してもらう
-- OK なら xArm を動かす関数を呼ぶ（中身はまだ TODO）
+修正点（あなたの要望に対応）:
+1) 「2〜3回連続したら温かい(or別温度帯)へ移る」を実現
+   - streak を “温度差(close_thr)” ではなく “bucket(cold/warm/hot) の連続回数” で数える
+   - streak_len >= target_streak のとき、LLM の enum を “別bucket候補” に絞って強制に近づける
 
-前提:
-- src/pipeline.py              : PerceptionPipeline
-- src/thermal/thermal_gpt_system.py : ThermalGPTSystem（カメララッパとして使用）
-- src/planner/task_planner.py  : TaskPlanner（使ってもいいし、今回は直接 LLM 判定でもよい）
-- キャリブ結果を JSON で保存しておき、ここで読み込む
+2) 断定用ログを追加
+   - 各ラベルの thermal mean/max/p95/hot_ratio/mode/npts/bucket を毎回表示
+
+3) destroyWindow の Null pointer 落ちを回避（try/except）
+
+注意:
+- このファイルは「あなたが貼ってくれた現状コード」をベースに、
+  変更が必要な箇所を統合して “全体” として貼っています。
+- 既存の src/* の実装はそのまま使う想定です。
 """
 
 import os
 import sys
 import time
 import json
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 
 import cv2
 import numpy as np
@@ -37,27 +38,17 @@ sys.path.append(PROJECT_ROOT)
 from src.pipeline import PerceptionPipeline
 from src.thermal.thermal_gpt_system import ThermalGPTSystem
 from src.utils.misc import draw_mask_on_image
-# TaskPlanner を使うなら import
-from src.planner.task_planner import TaskPlanner
+from src.planner.task_planner import TaskPlanner  # （使うなら）
 
 
 # ==============================
 # 設定項目（ここを環境に合わせて変更）
 # ==============================
 
-# xArm の IP
 XARM_IP = "192.168.1.199"
 
-# キャリブレーション JSON ファイルのパス
 CALIB_PATH = os.path.join(PROJECT_ROOT, "calibrations", "calib_config.json")
-# 例として以下のキーを期待:
-# {
-#   "K_color": [[fx, 0, cx],[0, fy, cy],[0,0,1]],
-#   "T_base_realsense": [[...4x4...]],
-#   "T_realsense_thermal": [[...4x4...]]
-# }
 
-# SAM2 の設定ファイル / 重み
 SAM2_CFG = os.path.join(
     PROJECT_ROOT, "..", "sam2", "sam2", "configs", "sam2.1", "sam2.1_hiera_b+.yaml"
 )
@@ -65,13 +56,17 @@ SAM2_CKPT = os.path.join(
     PROJECT_ROOT, "..", "sam2", "checkpoints", "sam2.1_hiera_base_plus.pt"
 )
 
-# CLIP プロンプト設定モード
-# "manual" : 辞書を手書き指定
-# "llm"    : ループ最初に GPT に画像を見せて CLIP 用ラベル/プロンプトを生成（オプション）
 PROMPT_MODE = "manual"
 
-# Thermal 側の安全温度しきい値（例：65℃）
 SAFE_TEMP_MAX = 50
+
+# 温度帯の閾値（現場で調整）
+COLD_THR = 25.0
+HOT_THR  = 40.0
+
+# streak の設定
+TARGET_STREAK = 3   # 3回続いたら別bucketへ（2にしたければ 2）
+# ※ 連続回数は「bucket連続」で数えるので、foodが変わっても bucket が同じなら streak 継続するのが仕様です
 
 
 # ==============================
@@ -79,17 +74,6 @@ SAFE_TEMP_MAX = 50
 # ==============================
 
 def load_calibration(path: str) -> Dict[str, Any]:
-    """
-    calib_config.json を読み込み、thermal が指定されていれば npz から
-    Thermal intrinsics/extrinsics を読み込んで統合する。
-
-    最終的に返す data には少なくとも以下が入る:
-      - K_color (3x3)
-      - T_realsense_base (4x4)    [あれば]
-      - K_thermal (3x3)
-      - dist_thermal (Nx1)
-      - T_realsense_thermal (4x4) = Thermal <- RGB
-    """
     import os, json
     import numpy as np
 
@@ -100,7 +84,6 @@ def load_calibration(path: str) -> Dict[str, Any]:
         return T
 
     def _invert_rt(R, t3x1):
-        # p_rgb = R_th2rgb * p_th + t_th2rgb の逆
         Rinv = R.T
         tinv = -Rinv @ t3x1
         return Rinv, tinv
@@ -111,12 +94,10 @@ def load_calibration(path: str) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # JSONの場所を基準に相対パスを解決
     base_dir = os.path.dirname(os.path.abspath(path))
     def _resolve(p):
         return p if os.path.isabs(p) else os.path.normpath(os.path.join(base_dir, p))
 
-    # --- JSON側のnumpy化 ---
     if "K_color" in data:
         data["K_color"] = np.asarray(data["K_color"], dtype=np.float64)
     if "dist_coeffs" in data:
@@ -124,17 +105,14 @@ def load_calibration(path: str) -> Dict[str, Any]:
     if "T_realsense_base" in data:
         data["T_realsense_base"] = np.asarray(data["T_realsense_base"], dtype=np.float64)
     if "T_realsense_thermal" in data:
-        # もし直書きされてたらそれを優先（npzより優先）
         data["T_realsense_thermal"] = np.asarray(data["T_realsense_thermal"], dtype=np.float64)
 
-    # --- thermal npz を読む ---
     th_cfg = data.get("thermal", None)
     if th_cfg is not None:
         TH_INTR_NPZ = th_cfg.get("intrinsics_npz", None)
         TH_EXT_NPZ  = th_cfg.get("extrinsics_npz", None)
         direction   = th_cfg.get("extrinsics_direction", "th2rgb").lower()
 
-        # intrinsics
         if TH_INTR_NPZ is not None:
             intr_path = _resolve(TH_INTR_NPZ)
             if not os.path.exists(intr_path):
@@ -147,13 +125,10 @@ def load_calibration(path: str) -> Dict[str, Any]:
             data["K_thermal"] = K_th
             data["dist_thermal"] = dist_th
 
-            # サイズが保存されていれば使う（無ければPI160固定）
             W = int(th["W"]) if "W" in th else 160
             H = int(th["H"]) if "H" in th else 120
             data["thermal_size"] = (W, H)
 
-        # extrinsics
-        # ※T_realsense_thermal がJSON直書きで無いときだけ作る
         if TH_EXT_NPZ is not None and ("T_realsense_thermal" not in data):
             ext_path = _resolve(TH_EXT_NPZ)
             if not os.path.exists(ext_path):
@@ -164,90 +139,67 @@ def load_calibration(path: str) -> Dict[str, Any]:
             t_th2rgb = ex["t_th2rgb"].astype(np.float64).reshape(3, 1)
 
             if direction == "th2rgb":
-                # 欲しいのは Thermal <- RGB なので逆にする
                 R_rgb2th, t_rgb2th = _invert_rt(R_th2rgb, t_th2rgb)
                 data["T_realsense_thermal"] = _make_T(R_rgb2th, t_rgb2th)
             elif direction == "rgb2th":
-                # npzが最初から RGB->Thermal を入れている運用の場合
                 data["T_realsense_thermal"] = _make_T(R_th2rgb, t_th2rgb)
             else:
                 raise ValueError("extrinsics_direction must be 'th2rgb' or 'rgb2th'")
 
-    # 以降の処理でfloat32が良ければここで落としてもOK
-    # data["K_color"] = data["K_color"].astype(np.float32) など
-
     return data
 
 
-
 def init_xarm(ip: str) -> XArmAPI:
-    """
-    xArm 本体と接続して「動ける状態」にする初期化関数。
-
-    - motion_enable(True)
-    - set_mode(0)  : ポジションモード
-    - set_state(0) : Ready 状態
-    """
     arm = XArmAPI(ip)
     print(f"[xArm] 接続中... IP={ip}")
 
     arm.motion_enable(True)
-    arm.set_mode(0)   # position mode
-    arm.set_state(0)  # ready
+    arm.set_mode(0)
+    arm.set_state(0)
     time.sleep(1.0)
 
     err, warn = arm.get_err_warn_code()
     print(f"[xArm] err={err}, warn={warn}")
     if err != 0:
         print("⚠ xArm にエラーが残っています。GUI で一度クリアしておくと安心です。")
-
     return arm
 
 
 def init_realsense() -> rs.pipeline:
-    """
-    RealSense のパイプラインを開始する。
-    color と depth を 640x480@30fps で有効化し、depth を color にアラインする。
-    """
     pipeline = rs.pipeline()
     config = rs.config()
 
     config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
     config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
 
-    profile = pipeline.start(config)
-
-    # align オブジェクトは main 内で作る（align_to = rs.stream.color）
+    pipeline.start(config)
     print("✓ RealSense スタート")
     return pipeline
 
-def CheckIfNewPositionInWorkspace(x,y,z):
-    if x > 500  or x < 200:
+
+def CheckIfNewPositionInWorkspace(x, y, z):
+    if x > 500 or x < 250:
         return False
-    if y < -200 or y > 300:
+    if y < -200 or y > 200:
         return False
     if z < 94 or z > 400:
         return False
     return True
 
 
-
 def build_manual_clip_prompts() -> Dict[str, Any]:
-    """
-    CLIP 用のラベル＆プロンプトを手動定義。
-    必要に応じてここを編集すればよい。
-    """
     return {
-        "Strawberry Yogurt" :[
+        "Strawberry Yogurt": [
             "a bowl of yogurt with strawberry jam",
             "creamy yogurt with red fruit jam",
-           "white yogurt mixed with strawberry jam",
+            "white yogurt mixed with strawberry jam",
         ],
-        "curry source":[
-            "thick brown curry sauce"
-            "Japanese curry roux sauce"
-            "brown curry gravy"
-            "curry sauce without rice"
+        "curry source": [
+            "thick brown curry sauce",
+            "Japanese curry roux sauce",
+            "brown curry gravy",
+            "curry sauce without rice",
+            "a plate of curry source",
         ],
         "Cone": [
             "a plate of yellow sweet corn kernels",
@@ -257,85 +209,49 @@ def build_manual_clip_prompts() -> Dict[str, Any]:
     }
 
 
-def build_clip_prompts_with_gpt(client: OpenAI, color_image: np.ndarray) -> Dict[str, Any]:
-    """
-    （オプション）RGB 画像を GPT-4o に見せて、
-    CLIP 用のラベルとプロンプト辞書を生成してもらう。
-    うまくいかなくてもシステムが止まらないよう、失敗時は空 dict を返す。
-    """
-    import base64
+def hard_thermal_safety_check(
+    rec: Dict[str, Any],
+    safe_temp_max: float,
+    hot_ratio_max: float = 0.10,
+    require_project: bool = False,
+    min_npts: int = 15,
+    max: float = 65.0,
+) -> Tuple[bool, str]:
+    th = rec.get("thermal", {})
+    if not th.get("ok", False):
+        return False, "thermal not available"
 
-    # 画像を JPEG にエンコードして base64 化
-    ok, buf = cv2.imencode(".jpg", color_image)
-    if not ok:
-        print("⚠ 画像エンコード失敗。手動プロンプトを使ってください。")
-        return {}
+    mode = th.get("mode", None)
+    npts = int(th.get("npts", 0))
 
-    b64 = base64.b64encode(buf).decode("ascii")
-    image_url = f"data:image/jpeg;base64,{b64}"
+    if require_project and mode != "project":
+        return False, f"mode={mode} rejected"
 
-    prompt = """
-You are a vision assistant for a meal-assistance robot.
-Look at the plate and list each distinct food type (e.g., "rice", "curry", "salad").
-For each food type, output 2-3 short English phrases that can be used as CLIP text prompts.
+    if mode == "project" and npts < min_npts:
+        return False, f"too few projected points (npts={npts})"
 
-Output strictly in JSON:
-{
-  "labels": ["rice", "curry", "salad"],
-  "clip_prompts": {
-    "rice": ["a plate of rice", "cooked rice"],
-    "curry": ["a plate of curry", "curry rice"],
-    ...
-  }
-}
-"""
+    p95 = th.get("p95", None)
+    hot_ratio = th.get("hot_ratio", None)
+    tmax = th.get("max", None)
 
-    try:
-        resp = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": image_url}},
-                    ],
-                }
-            ],
-            max_tokens=400,
-            temperature=0,
-        )
-        txt = resp.choices[0].message.content
-        data = json.loads(txt)
-        clip_prompts = data.get("clip_prompts", {})
-        print("[CLIP PROMPTS from GPT]", clip_prompts)
-        return clip_prompts
-    except Exception as e:
-        print("⚠ GPT による CLIP プロンプト生成に失敗しました:", e)
-        return {}
+    if tmax is not None and float(tmax) >= safe_temp_max + 10.0:
+        return False, f"tmax={tmax:.1f} >= safe+10"
+
+    if p95 is None or hot_ratio is None:
+        return False, "missing p95/hot_ratio"
+
+    if float(hot_ratio) > hot_ratio_max:
+        return False, f"hot_ratio={hot_ratio:.2f} > {hot_ratio_max:.2f}"
+
+    return True, "safe"
 
 
-def compute_bbox_center_depth_to_base(
-    center_px,
-    depth_m: float,
-    calib: Dict[str, Any],
-) -> Optional[np.ndarray]:
-    """
-    RGB 画像上の中心画素 + 深度[m] から、
-    ロボット base 座標系の 3D 点 (x,y,z) を計算する。
-
-    前提:
-        K_color: 3x3 の内パラ
-        T_realsense_base: 4x4, Base ← RealSense
-
-    戻り値:
-        np.array([x, y, z])  (単位: m)
-    """
+def compute_bbox_center_depth_to_base(center_px, depth_m: float, calib: Dict[str, Any]) -> Optional[np.ndarray]:
     if center_px is None or depth_m is None or depth_m <= 0:
         return None
 
     K = calib.get("K_color", None)
-    T_rb = calib.get("T_realsense_base", None)  # Base ← RealSense
+    T_rb = calib.get("T_realsense_base", None)
 
     if K is None or T_rb is None:
         print("⚠ calib に K_color / T_realsense_base がありません。")
@@ -347,34 +263,25 @@ def compute_bbox_center_depth_to_base(
     cy = K[1, 2]
 
     u, v = center_px
-    Z = depth_m  # [m]
+    Z = depth_m
 
-    # カメラ座標系 (RealSense color) での 3D 点
     X = (u - cx) * Z / fx
     Y = (v - cy) * Z / fy
     P_cam = np.array([X, Y, Z, 1.0], dtype=np.float32)
 
-    # Base 座標系へ
     P_base = T_rb @ P_cam
     return P_base[:3]
 
+
 def crop_thermal_region_by_color_bbox(
     bbox_color,
-    thermal_data: np.ndarray,      # (H_th, W_th) 温度[C]（raw）
+    thermal_data: np.ndarray,
     calib: Dict[str, Any],
-    depth_u16: np.ndarray,         # (H, W) aligned depth [mm] uint16
+    depth_u16: np.ndarray,
     sample_step: int = 8,
     min_valid_points: int = 10,
     margin: int = 2,
-) -> Tuple[Optional[np.ndarray], Optional[Tuple[int,int,int,int]], str, int]:
-    """
-    RGB bbox + depth から Thermal(raw) 上の bbox を推定して crop する。
-    戻り値:
-      region: thermal_data の切り出し
-      bbox_t: (x1_t, y1_t, x2_t, y2_t) in thermal image coordinates
-      mode  : "project" or "fallback_scale"
-      npts  : 投影に使えた点数
-    """
+) -> Tuple[Optional[np.ndarray], Optional[Tuple[int, int, int, int]], str, int]:
     if bbox_color is None or thermal_data is None or depth_u16 is None:
         return None, None, "none", 0
 
@@ -402,8 +309,6 @@ def crop_thermal_region_by_color_bbox(
     cx, cy = float(Kc[0, 2]), float(Kc[1, 2])
 
     pts_uv = []
-
-    # bbox内を格子状にサンプルして投影
     for v in range(y1, y2, sample_step):
         for u in range(x1, x2, sample_step):
             d_mm = int(depth_u16[v, u])
@@ -433,7 +338,6 @@ def crop_thermal_region_by_color_bbox(
 
     npts = len(pts_uv)
 
-    # フォールバック：スケールで雑に
     if npts < min_valid_points:
         sx = w_th / float(W)
         sy = h_th / float(H)
@@ -443,18 +347,16 @@ def crop_thermal_region_by_color_bbox(
         y2_t = int(np.clip(y2 * sy, 0, h_th - 1))
         if x2_t <= x1_t or y2_t <= y1_t:
             return None, None, "fallback_scale", npts
-
         region = thermal_data[y1_t:y2_t, x1_t:x2_t]
-        bbox_t = (x1_t, y1_t, x2_t, y2_t)
-        return (region if region.size > 0 else None), bbox_t, "fallback_scale", npts
+        return (region if region.size > 0 else None), (x1_t, y1_t, x2_t, y2_t), "fallback_scale", npts
 
     us = np.array([p[0] for p in pts_uv], dtype=np.float64)
     vs = np.array([p[1] for p in pts_uv], dtype=np.float64)
 
     x1_t = int(np.floor(us.min())) - margin
-    x2_t = int(np.ceil (us.max())) + margin
+    x2_t = int(np.ceil(us.max())) + margin
     y1_t = int(np.floor(vs.min())) - margin
-    y2_t = int(np.ceil (vs.max())) + margin
+    y2_t = int(np.ceil(vs.max())) + margin
 
     x1_t = max(0, min(w_th - 1, x1_t))
     x2_t = max(0, min(w_th - 1, x2_t))
@@ -465,27 +367,16 @@ def crop_thermal_region_by_color_bbox(
         return None, None, "project", npts
 
     region = thermal_data[y1_t:y2_t, x1_t:x2_t]
-    bbox_t = (x1_t, y1_t, x2_t, y2_t)
-    return (region if region.size > 0 else None), bbox_t, "project", npts
+    return (region if region.size > 0 else None), (x1_t, y1_t, x2_t, y2_t), "project", npts
 
 
 def attach_thermal_to_per_label_best(
     per_label_best: Dict[str, Dict[str, Any]],
-    thermal_data: np.ndarray,   # (Hth,Wth) 温度[C] raw
+    thermal_data: np.ndarray,
     calib: Dict[str, Any],
-    depth_u16: np.ndarray,      # aligned depth (H,W) uint16 mm
+    depth_u16: np.ndarray,
     sample_step: int = 8,
 ) -> Dict[str, Dict[str, Any]]:
-    """
-    per_label_best[lbl]["thermal"] に以下を入れる:
-      {
-        "ok": bool,
-        "bbox_t": [x1,y1,x2,y2] or None,
-        "min": float, "max": float, "mean": float,
-        "p95": float, "hot_ratio": float,
-        "mode": str, "npts": int
-      }
-    """
     for lbl, rec in per_label_best.items():
         bbox = rec.get("bbox", None)
         if bbox is None:
@@ -504,130 +395,238 @@ def attach_thermal_to_per_label_best(
             rec["thermal"] = {"ok": False, "bbox_t": None, "mode": mode, "npts": int(npts)}
             continue
 
-        # stats（分布も）
         r = region.astype(np.float64)
         tmin = float(np.min(r))
         tmax = float(np.max(r))
         tmean = float(np.mean(r))
+        p90 = float(np.percentile(r, 90))
         p95 = float(np.percentile(r, 95))
-        # “しきい値以上の割合” を特徴量として渡す（閾値で弾くのではなく）
-        safe = float(calib.get("safe_temp_max", 50))  # 後で main で入れると楽
+        tmedian = float(np.median(r))
+        safe = float(calib.get("safe_temp_max", 50))
         hot_ratio = float(np.mean(r > safe))
 
         rec["thermal"] = {
             "ok": True,
             "bbox_t": [int(bbox_t[0]), int(bbox_t[1]), int(bbox_t[2]), int(bbox_t[3])],
             "min": tmin, "max": tmax, "mean": tmean,
+            "median": tmedian,
+            "p90": p90,     
             "p95": p95,
             "hot_ratio": hot_ratio,
             "mode": mode,
             "npts": int(npts),
         }
+
     return per_label_best
 
 
+# ---------- 温度帯（bucket）と streak ----------
+import math
 
-def decide_next_label_with_thermal_llm_A(
+# 2値bucket用：HOT_THR未満はcold、それ以上はhot
+def temp_bucket(t_c: Optional[float], hot_thr: float = HOT_THR) -> str:
+    if t_c is None or (isinstance(t_c, float) and (math.isnan(t_c) or math.isinf(t_c))):
+        return "unknown"
+    return "cold" if t_c < hot_thr else "hot"
+
+
+def compute_bucket_streak_len(history: List[Dict[str, Any]], hot_thr: float = HOT_THR) -> int:
+    """
+    末尾から見て bucket(cold/hot) が何回連続したか（unknownが出たら停止）
+    """
+    if not history:
+        return 0
+
+    buckets = []
+    for h in history:
+        t = h.get("temp_mean_c", None)
+        try:
+            t = float(t) if t is not None else None
+        except Exception:
+            t = None
+        buckets.append(temp_bucket(t, hot_thr=hot_thr))
+
+    if buckets[-1] == "unknown":
+        return 0
+
+    last_b = buckets[-1]
+    streak = 1
+    for b in reversed(buckets[:-1]):
+        if b == "unknown":
+            break
+        if b == last_b:
+            streak += 1
+        else:
+            break
+    return streak
+
+
+
+def history_last_label_and_temp(history: List[Dict[str, Any]]) -> Tuple[Optional[str], Optional[float]]:
+    if not history:
+        return None, None
+    last = history[-1]
+    lbl = last.get("label", None)
+    t = last.get("temp_mean_c", None)
+    try:
+        t = float(t) if t is not None else None
+    except Exception:
+        t = None
+    return (lbl if isinstance(lbl, str) else None), t
+
+
+def choose_label_llm_grouped_2to3(
     client: OpenAI,
-    per_label_best: Dict[str, Dict[str, Any]],
-    history: list,
-    safe_temp_max: float,
+    safe_candidates: Dict[str, Dict[str, Any]],
+    history: List[Dict[str, Any]],
+    target_streak: int = TARGET_STREAK,
+    hot_thr: float = HOT_THR,   # ★2値bucketなので hot_thr だけでOK
 ) -> Dict[str, Any]:
     """
-    A案：LLM 1回で
-      - 次に食べるラベル選択
-      - 食べて良いか(allow)
-    をまとめて決める
+    2〜3回は同じ bucket(cold/hot) を続けるが、target_streak に達したら別bucketへ移る（強め）
+    - enum を preferred に絞ることで「スイッチ」をほぼ強制
+    - cold内では最後の優先事項として「直前と違うラベル」を優先（promptで）
     """
-    from collections import Counter
-    counts = dict(Counter(history))
-    last = history[-1] if history else None
+    if not safe_candidates:
+        return {"food_label": None, "reason": "no safe candidates"}
 
-    # LLMに渡す情報（no_thermalのsummaryを拡張）
-    summary = []
-    for lbl, rec in per_label_best.items():
-        th = rec.get("thermal", {})
-        summary.append({
+    last_label, last_temp = history_last_label_and_temp(history)
+    last_bucket = temp_bucket(last_temp, hot_thr=hot_thr) if last_temp is not None else "unknown"
+    streak_len = compute_bucket_streak_len(history, hot_thr=hot_thr)
+
+    items = []
+    for lbl, rec in safe_candidates.items():
+        th = rec.get("thermal", {}) or {}
+        t_mean = th.get("p90", None)   # medianベース
+
+        delta = None
+        if last_temp is not None and t_mean is not None:
+            delta = abs(float(t_mean) - float(last_temp))
+
+        items.append({
             "label": lbl,
-            "score": float(rec.get("score", 0.0)),
-            "center_px": rec.get("center_px"),
-            "depth_m": rec.get("depth_m"),
-            "thermal_ok": bool(th.get("ok", False)),
-            "thermal_mode": th.get("mode", None),
-            "thermal_npts": th.get("npts", 0),
-            "temp_min": th.get("min", None),
-            "temp_mean": th.get("mean", None),
-            "temp_p95": th.get("p95", None),
-            "temp_max": th.get("max", None),
-            "hot_ratio": th.get("hot_ratio", None),
+            "temp_mean_c": t_mean,
+            "bucket": temp_bucket(t_mean, hot_thr=hot_thr) if t_mean is not None else "unknown",
+            "delta_to_last_c": delta,
         })
-    summary.sort(key=lambda x: x["score"], reverse=True)
 
-    allowed_labels = list(per_label_best.keys())
+    allowed_all = [x["label"] for x in items]
+    preferred = allowed_all
+
+    # ---- 切替フェーズ：別bucketに絞る ----
+    if last_temp is not None and streak_len >= target_streak and last_bucket != "unknown":
+        switch_pool = [
+            x for x in items
+            if x["temp_mean_c"] is not None and x["bucket"] != "unknown" and x["bucket"] != last_bucket
+        ]
+        preferred = [x["label"] for x in switch_pool] if switch_pool else allowed_all
+
+    # --- history summary（直近だけ） ---
+    hist_view = []
+    for h in history[-8:]:
+        lbl = h.get("label", None)
+        tt  = h.get("temp_mean_c", None)
+        try:
+            tt = float(tt) if tt is not None else None
+        except Exception:
+            tt = None
+        hist_view.append({
+            "label": lbl,
+            "temp_c": tt,
+            "bucket": temp_bucket(tt, hot_thr=hot_thr),
+        })
 
     prompt = f"""
 You are a task planner for a meal-assistance robot.
+All candidates are SAFE.
 
-You must decide:
-1) whether the robot should feed now (allow)
-2) if allow=true, choose exactly ONE food_label from the allowed list
+We group by temperature bucket (cold/hot):
+- If current bucket streak_len < {target_streak}: it must stay in the same bucket if possible. Examples write below.
+ex1)streak_len = 0 or1 or 2 and hot bucket must keep hot bucket.
+ex2)streak_len = 0 or1 or 2 and cold bucket must keep cold bucket.
+- especially, if streak_len = 1, bucket must not change!!
+- If streak_len >= {target_streak}: SWITCH to a DIFFERENT bucket if possible (strong preference).
 
-You are given per-label best RGB candidates + thermal statistics.
+Candidates (temp_mean_c uses median):
+{json.dumps(items, ensure_ascii=False)}
 
-Candidates (JSON list):
-{json.dumps(summary, ensure_ascii=False)}
+Last label: {last_label}
+Last temp_c: {last_temp}
+Last bucket: {last_bucket}
+Bucket streak_len: {streak_len}
 
-Eating history: {history}
-Counts: {counts}
-Last eaten: {last}
+History (old -> new):
+{json.dumps(hist_view, ensure_ascii=False)}
 
-Thermal safety reference (NOT a hard-coded rule, but a key safety indicator):
-safe_temp_max = {safe_temp_max:.1f} °C
+Final preference (lowest priority tie-breaker):
+- If choosing within the COLD bucket and multiple options satisfy the above rules,
+  prefer alternating foods: avoid picking the same label as the last_label if possible.
+-If choosing within the Hot bucket, you can choose the same thing as last label.
 
-Guidance:
-- Prefer variety (avoid repeating the same label too many times).
-- Use thermal stats responsibly:
-  * temp_max/p95/mean show the temperature distribution.
-  * hot_ratio is the fraction of pixels above safe_temp_max (hot spots vs wide hot area).
-  * thermal_ok/mode/npts indicates confidence in the projection.
-- If all candidates look unsafe or unreliable, set allow=false.
-
-Allowed labels:
-{allowed_labels}
+Allowed labels (you MUST pick one):
+{preferred}
 
 Output STRICT JSON only:
 {{
-  "allow": true/false,
-  "food_label": "<one of allowed labels or null>",
-  "reason": "<short English reason>"
+  "food_label": "<one of allowed labels>",
+  "reason": "<short English reason; mention bucket + streak + (if cold) alternation>"
 }}
 """
-    try:
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=250,
-            temperature=0,
-        )
-        return json.loads(resp.choices[0].message.content)
-    except Exception as e:
-        print("⚠ LLM planning failed:", e)
-        return {"allow": False, "food_label": None, "reason": "LLM_error"}
 
+    schema = {
+        "type": "object",
+        "properties": {
+            "food_label": {"type": "string", "enum": preferred},
+            "reason": {"type": "string"},
+        },
+        "required": ["food_label", "reason"],
+        "additionalProperties": False
+    }
+
+    try:
+        resp = client.responses.create(
+            model="gpt-4o-mini",
+            input=[{"role": "user", "content": prompt}],
+            text={"format": {"type": "json_schema", "name": "choose_label_grouped", "strict": True, "schema": schema}},
+        )
+        return json.loads(resp.output_text)
+
+    except Exception as e:
+        # fallback
+        def score(x):
+            d = x.get("delta_to_last_c", None)
+            return 1e9 if d is None else d
+
+        if last_temp is None:
+            best = items[0]
+            return {"food_label": best["label"], "reason": f"fallback(no last temp): {e.__class__.__name__}"}
+
+        if streak_len >= target_streak:
+            cand = [x for x in items if x["label"] in preferred]
+            # preferredがswitch_poolなら同bucket回避は保証される
+            cand2 = [x for x in cand if x.get("delta_to_last_c") is not None]
+            best = max(cand2, key=lambda x: x["delta_to_last_c"]) if cand2 else cand[0]
+            return {"food_label": best["label"], "reason": f"fallback(switch): {e.__class__.__name__}"}
+        else:
+            cand = [x for x in items if x["label"] in preferred]
+            cand2 = [x for x in cand if x.get("delta_to_last_c") is not None]
+            best = min(cand2, key=score) if cand2 else cand[0]
+            return {"food_label": best["label"], "reason": f"fallback(stay): {e.__class__.__name__}"}
+
+
+
+
+# ---------- 見た目デバッグ ----------
 def make_thermal_debug_view(thermal_data: np.ndarray) -> np.ndarray:
-    """
-    thermal_data (float, °C) を 8bitグレースケールに正規化して表示用画像を作る
-    """
     td = thermal_data.astype(np.float32)
     lo, hi = np.percentile(td, 2), np.percentile(td, 98)
     if hi <= lo:
         hi = lo + 1.0
     img8 = np.clip((td - lo) / (hi - lo) * 255.0, 0, 255).astype(np.uint8)
-    vis = cv2.cvtColor(img8, cv2.COLOR_GRAY2BGR)
-    return vis
+    return cv2.cvtColor(img8, cv2.COLOR_GRAY2BGR)
 
 
-
+# ---------- ロボット動作（あなたの現状維持） ----------
 def move_robot_to_food(
     arm: XArmAPI,
     center_px,
@@ -635,20 +634,12 @@ def move_robot_to_food(
     calib: Dict[str, Any],
     label: str,
 ):
-    """
-    LLM + CLIP で決定した「次の一口」の座標をもとに、
-    xArm を動かすための入口関数。
-
-    今はまだ「座標を print するだけ」＋「TODO コメント」でOK。
-    あとでここに set_position() などを書き足していく。
-    """
     print("")
     print("========== [ROBOT ACTION] ==========")
     print(f"  target food  : {label}")
     print(f"  image center : {center_px}")
     print(f"  depth (m)    : {depth_m}")
 
-    # Base 座標を計算（キャリブがあれば）
     P_base = compute_bbox_center_depth_to_base(center_px, depth_m, calib)
     if P_base is not None:
         x_b, y_b, z_b = P_base
@@ -656,20 +647,15 @@ def move_robot_to_food(
     else:
         print("  base coord   : (未計算 / キャリブ未設定)")
 
-    print("  ※ ここで pixel + depth → Base 座標に変換して xArm を動かす")
     print("====================================")
 
-
-    # --- TODO: 実際のロボット動作をここに実装する ---
-    # 例:
     if P_base is not None:
-        # mm 単位に変換
         x_mm, y_mm, z_mm = x_b * 1000 - 240, y_b * 1000, 210
         error = 15
+
         CheckIfNewPositionInWorkspace(x_mm, y_mm, z_mm + 50)
-        # アプローチ姿勢
         arm.set_position(
-            x_mm, y_mm, z_mm + 50,   # 5cm 上から
+            x_mm, y_mm, z_mm + 50,
             roll=-135, pitch=0, yaw=-90,
             speed=50, mvacc=1000,
             wait=True
@@ -697,22 +683,12 @@ def move_robot_to_food(
         )
 
 
-    
-    #     # 掬い動作など…
-    #
-    # -------------------------------------------------
-
-def move_food_to_mouth(arm:XArmAPI):
+def move_food_to_mouth(arm: XArmAPI):
     arm.set_position(430, 20, 300, -90, 0, -90)
-    return
 
 
 def move_first_position(arm: XArmAPI):
-    arm.set_position(360, 40, 320, -90, 0, -90)
-    return
-
-
-
+    arm.set_position(360, -100, 320, -90, 0, -90)
 
 
 # ==============================
@@ -720,18 +696,16 @@ def move_first_position(arm: XArmAPI):
 # ==============================
 
 def main():
-    t_program_start = time.perf_counter()  # ★全体計測 start
+    t_program_start = time.perf_counter()
     print("=== Meal-Assistance Robot Main ===")
     print("Project root:", PROJECT_ROOT)
 
-    # --- OpenAI API キー ---
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         print("❌ OPENAI_API_KEY が環境変数として設定されていません。")
         return
     client = OpenAI(api_key=api_key)
 
-    # --- キャリブ読み込み ---
     try:
         calib = load_calibration(CALIB_PATH)
         print("✓ Calibration loaded from:", CALIB_PATH)
@@ -740,26 +714,23 @@ def main():
         print("   Base 座標への変換はスキップされます。")
         calib = {}
 
-    # --- xArm 初期化 ---
     arm = init_xarm(XARM_IP)
 
-    # --- RealSense 初期化 ---
     rs_pipeline = init_realsense()
     align_to = rs.stream.color
     align = rs.align(align_to)
 
-    # --- Thermal GPT System（カメララッパとして利用） ---
     thermal_system = ThermalGPTSystem(openai_api_key=api_key, target_temp=SAFE_TEMP_MAX)
 
-    # --- PerceptionPipeline (SAM2 + CLIP) 初期化 ---
     if not os.path.exists(SAM2_CFG):
         print("❌ SAM2 config が見つかりません:", SAM2_CFG)
         return
     if not os.path.exists(SAM2_CKPT):
         print("❌ SAM2 checkpoint が見つかりません:", SAM2_CKPT)
         return
+    
+    times = 0
 
-    # CLIP プロンプト
     clip_prompts = build_manual_clip_prompts()
     pipe = PerceptionPipeline(
         sam2_cfg=SAM2_CFG,
@@ -767,23 +738,23 @@ def main():
         device="cuda",
         maskgen_interval=1,
         min_area=1000,
-        max_area_frac=0.5,
+        max_area_frac=0.15,
         clip_model="ViT-B/32",
         clip_prompts=clip_prompts,
         enable_depth=True,
     )
 
-    eat_history = []  # 例: ["rice", "curry", ...]
+    eat_history: List[Dict[str, Any]] = []  # ★ list で統一（append する）
+
+    WIN_TH = "THERMAL RAW + projected bbox"
 
     try:
         while True:
-            # --- ユーザーの Enter 待ち ---
             cmd = input("\n>>> 次の一口を開始するには Enter、終了するには q + Enter: ").strip().lower()
             if cmd == "q":
                 print("▶ ユーザー入力により終了します。")
                 break
 
-            # --- RealSense から 1フレーム取得 ---
             frames = rs_pipeline.wait_for_frames()
             aligned = align.process(frames)
 
@@ -793,36 +764,23 @@ def main():
                 print("⚠ フレーム取得に失敗しました。スキップします。")
                 continue
 
-            depth_image = np.asanyarray(depth_frame.get_data())   # (H, W), uint16, mm
-            color_image = np.asanyarray(color_frame.get_data())   # (H, W, 3), BGR
+            depth_image = np.asanyarray(depth_frame.get_data())
+            color_image = np.asanyarray(color_frame.get_data())
 
-            # --- オプション: GPT から CLIP プロンプト生成 ---
-            if PROMPT_MODE == "llm":
-                auto_prompts = build_clip_prompts_with_gpt(client, color_image)
-                if auto_prompts:
-                    pipe.update_clip_prompts(auto_prompts)
-
-            # --- RGB パイプライン (SAM2 + CLIP + Depth) ---
             rgb_out = pipe.process_frame(color_image, depth_frame=depth_image)
-
             instances = rgb_out.get("instances", {})
-            fps = rgb_out.get("fps")
 
             if not instances:
                 print("⚠ 食材が認識できませんでした。次のループへ。")
                 continue
 
-            # --- Thermal から温度取得（A案でも必須） ---
             thermal = thermal_system.capture()
             if thermal is None:
                 print("⚠ Thermal 画像取得に失敗。次のループへ。")
                 continue
 
-            thermal_data, thermal_img = thermal  # thermal_data: (Hth,Wth) float(°C)
+            thermal_data, thermal_img = thermal
 
-
-                        # スコア最大の食材を1つ選ぶ
-            # 1) per_label_best を作る（no_thermalと同じ形）
             per_label_best = {}
             for lbl, inst in instances.items():
                 per_label_best[lbl] = {
@@ -833,10 +791,8 @@ def main():
                     "mask": inst.get("mask"),
                 }
 
-            # 2) safe_temp_max を calib に入れておくと attach が楽
             calib["safe_temp_max"] = SAFE_TEMP_MAX
 
-            # 3) thermal stats を付与
             per_label_best = attach_thermal_to_per_label_best(
                 per_label_best=per_label_best,
                 thermal_data=thermal_data,
@@ -845,45 +801,100 @@ def main():
                 sample_step=8,
             )
 
-            # 4) LLM 1回で allow + chosen_label
-            decision = decide_next_label_with_thermal_llm_A(
-                client=client,
-                per_label_best=per_label_best,
-                history=eat_history,
-                safe_temp_max=SAFE_TEMP_MAX,
-            )
-            allow = decision.get("allow", False)
-            chosen_label = decision.get("food_label", None)
-            reason = decision.get("reason", "")
-            print("\n--- LLM Decision (A: choose label + allow) ---")
-            print("allow      :", allow)
+            # ===== 断定ログ：各ラベルの温度統計と bucket =====
+            print("\n[THERMAL STATS PER LABEL]")
+            for lbl, rec in per_label_best.items():
+                th = rec.get("thermal", {}) or {}
+                tm = th.get("p90", None)
+                try:
+                    tm_f = float(tm) if tm is not None else None
+                except Exception:
+                    tm_f = None
+                b = temp_bucket(tm_f, hot_thr=HOT_THR)
+                print(
+                    f"- {lbl:16s} p90={tm_f}C  max={th.get('max')}  p95={th.get('p95')}  "
+                    f"hot_ratio={th.get('hot_ratio')}  mode={th.get('mode')}  npts={th.get('npts')}  bucket={b}"
+                )
+            print("")
+
+            # ---- ハード安全フィルタ ----
+            safe_candidates = {}
+            unsafe_reasons = {}
+
+            for lbl, rec in per_label_best.items():
+                safe, why = hard_thermal_safety_check(
+                    rec,
+                    safe_temp_max=SAFE_TEMP_MAX,
+                    hot_ratio_max=0.10,
+                    require_project=False,  # ← ここを True にすると fallback_scale を弾ける（精度優先）
+                    min_npts=15,
+                    max=65,
+                )
+                rec.setdefault("thermal", {})["hard_safe"] = safe
+                rec["thermal"]["hard_safe_reason"] = why
+
+                if safe:
+                    safe_candidates[lbl] = rec
+                else:
+                    unsafe_reasons[lbl] = why
+
+            print("[HARD SAFETY] unsafe excluded:", unsafe_reasons)
+            print("[HARD SAFETY] safe labels:", list(safe_candidates.keys()))
+
+            if len(safe_candidates) == 0:
+                print("⚠ 安全な候補が無いので停止（全候補が高温/不確実）")
+                continue
+
+            # ===== streak表示（bucket streak） =====
+            streak_len_dbg = compute_bucket_streak_len(eat_history, hot_thr=HOT_THR)
+            last_lbl_dbg, last_temp_dbg = history_last_label_and_temp(eat_history)
+            last_bucket_dbg = temp_bucket(last_temp_dbg, hot_thr=HOT_THR) if last_temp_dbg is not None else "unknown"
+            print(f"[BUCKET STREAK] last=({last_lbl_dbg}, {last_temp_dbg}C, {last_bucket_dbg})  streak_len={streak_len_dbg}")
+
+            # ===== LLMで選択 =====
+            try:
+                sel = choose_label_llm_grouped_2to3(
+                    client=client,
+                    safe_candidates=safe_candidates,
+                    history=eat_history,
+                    target_streak=TARGET_STREAK,
+                    hot_thr=HOT_THR,
+                )
+                chosen_label = sel["food_label"]
+                reason = sel["reason"]
+            except Exception as e:
+                print("⚠ choose_label_llm_grouped_2to3 failed:", e)
+                chosen_label = max(safe_candidates.items(), key=lambda kv: kv[1].get("score", 0.0))[0]
+                reason = "fallback: choose highest RGB score among safe candidates"
+
+            print("\n--- HARD+LLM Decision ---")
+            print("allow      :", True)
             print("food_label :", chosen_label)
             print("reason     :", reason)
 
-            if not allow or not chosen_label or chosen_label not in per_label_best:
-                print("⚠ skip")
-                continue
-
-            chosen = per_label_best[chosen_label]
+            chosen = safe_candidates[chosen_label]
             bbox = chosen["bbox"]
             center_px = chosen["center_px"]
             depth_m = chosen["depth_m"]
-            th = chosen.get("thermal", {})
+            th = chosen.get("thermal", {}) or {}
             bbox_t = th.get("bbox_t", None)
 
-            # 5) Thermal raw のデバッグ表示（bbox_t）
+            # --- Thermal debug window（落ちないように保護） ---
             th_vis = make_thermal_debug_view(thermal_data)
             if bbox_t is not None:
-                x1,y1,x2,y2 = bbox_t
-                cv2.rectangle(th_vis, (x1,y1), (x2,y2), (0,255,0), 2)
-                cv2.putText(th_vis, f"{chosen_label}", (x1, max(0,y1-6)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1)
+                x1, y1, x2, y2 = bbox_t
+                cv2.rectangle(th_vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(th_vis, f"{chosen_label}", (x1, max(0, y1 - 6)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
-            cv2.imshow("THERMAL RAW + projected bbox", th_vis)
+            cv2.imshow(WIN_TH, th_vis)
             cv2.waitKey(0)
-            cv2.destroyWindow("THERMAL RAW + projected bbox")
+            try:
+                cv2.destroyWindow(WIN_TH)
+            except cv2.error:
+                pass
 
-            # --- OK: ロボットを動かす ---
+            # --- ロボット動作 ---
             move_robot_to_food(
                 arm=arm,
                 center_px=center_px,
@@ -892,12 +903,21 @@ def main():
                 label=chosen_label,
             )
 
-            # 食事履歴更新
-            eat_history.append(chosen_label)
+            # --- history更新（mean温度を記録） ---
+            t_rep = th.get("p90", None)
+            try:
+                t_rep = float(t_rep) if t_rep is not None else None
+            except Exception:
+                t_rep = None
 
-            # --- デバッグ用に RGB+マスク+BBox を表示 ---
+            eat_history.append({
+                "label": chosen_label,
+                "temp_mean_c": t_rep,
+            })
+
+            # --- RGB debug ---
             vis = color_image.copy()
-            for chosen_label, inst in instances.items():
+            for lbl2, inst in instances.items():
                 if inst.get("mask") is not None:
                     vis = draw_mask_on_image(vis, inst["mask"])
 
@@ -907,6 +927,8 @@ def main():
 
             cv2.imshow("Feeding Perception (RGB + SAM2 + CLIP)", vis)
             print("  → ウィンドウに RGB 認識結果を表示しました。何かキーを押すと閉じます。")
+            times += 1
+            print(f"{times}回目の作業です。")
             cv2.waitKey(0)
             cv2.destroyAllWindows()
 
@@ -920,31 +942,34 @@ def main():
                 if key == ord('f'):
                     move_first_position(arm=arm)
                     break
-                if key == ord('q') or key == 27:  # q or ESC で中断したい場合
+                if key == ord('q') or key == 27:
                     print("中断しました。")
                     break
 
-            cv2.destroyWindow("WAIT_KEY")
+            try:
+                cv2.destroyWindow("WAIT_KEY")
+            except cv2.error:
+                pass
 
     except KeyboardInterrupt:
         print("\n⏹ キーボード割り込みにより終了します。")
 
     finally:
-        # RealSense 停止
         try:
             rs_pipeline.stop()
         except Exception:
             pass
 
-        cv2.destroyAllWindows()
+        try:
+            cv2.destroyAllWindows()
+        except Exception:
+            pass
 
-        # Thermal 停止
         try:
             thermal_system.cleanup()
         except Exception:
             pass
 
-        # xArm 切断
         try:
             arm.disconnect()
             print("✓ xArm 切断")
@@ -952,6 +977,9 @@ def main():
             pass
 
         print("✓ 全てクリーンアップしました。")
+        t_program_end = time.perf_counter()
+        print(f"[TIME] total_program_time (incl waitKey) = {t_program_end - t_program_start:.3f} sec")
+        print(eat_history)
 
 
 if __name__ == "__main__":

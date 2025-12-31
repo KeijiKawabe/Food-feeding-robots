@@ -129,6 +129,7 @@ def build_manual_clip_prompts() -> Dict[str, Any]:
             "Japanese curry roux sauce",
             "brown curry gravy",
             "curry sauce without rice",
+            "a plate of curry source",
         ],
         "Cone": [
             "sweet corn kernels (maize kernels)",
@@ -369,10 +370,11 @@ def move_food_to_mouth(arm: XArmAPI):
     arm.set_position(430, 20, 300, -90, 0, -90)
 
 def move_first_position(arm: XArmAPI):
-    arm.set_position(360, 40, 320, -90, 0, -90)
+    arm.set_position(360, -100, 320, -90, 0, -90)
 
 
 def main():
+    times = 0
     t_program_start = time.perf_counter()  # ★全体計測 start
     print("=== Meal-Assistance Robot Main (Condition B: No Thermal / RANDOM chooses label) ===")
     print("Project root:", PROJECT_ROOT)
@@ -412,7 +414,7 @@ def main():
         device="cuda",
         maskgen_interval=1,
         min_area=1000,
-        max_area_frac=0.5,
+        max_area_frac=0.15,
         clip_model="ViT-B/32",
         clip_prompts=clip_prompts,
         enable_depth=True,
@@ -560,6 +562,8 @@ def main():
 
             cv2.imshow("Feeding Perception (Per-label best + RANDOM chosen)", vis)
             print("  → ウィンドウに RGB 認識結果を表示しました。何かキーを押すと閉じます。")
+            times += 1
+            print(str(times)+"回目の作業です。")
             cv2.waitKey(0)
             cv2.destroyAllWindows()
 
@@ -594,6 +598,7 @@ def main():
                 # ★全体計測 end
         t_program_end = time.perf_counter()
         print(f"[TIME] total_program_time (incl waitKey) = {t_program_end - t_program_start:.3f} sec")
+        print(eat_history)
 
 
 if __name__ == "__main__":
