@@ -4,7 +4,7 @@ import time
 import os
 import cv2
 from typing import Dict, Any, Optional
-
+import sys
 import numpy as np
 
 from .utils.misc import (
@@ -140,6 +140,10 @@ class PerceptionPipeline:
         import time
         import numpy as np
         import cv2
+
+
+
+        
 
         results = []
 
@@ -303,6 +307,9 @@ class PerceptionPipeline:
                 f"center={r['center_px']}"
             )
 
+
+
+        
         return results
 
 
@@ -387,6 +394,23 @@ class PerceptionPipeline:
 
     #     return results
 
+ 
+    def cripping(self, rgb, H, W):
+        y1, y2 = int(H * 0.5), int(H * 1.0)
+        x1, x2 = int(W * 0.3), int(W * 0.9)
+        
+        cropped_rgb = rgb[y1:y2, x1:x2]
+        
+        # 可視化
+        args = sys.argv
+        if len(args) > 1:
+            if self.frame_count % self.maskgen_interval == 0:
+                cv2.imshow("debug_roi_input", cv2.cvtColor(cropped_rgb, cv2.COLOR_RGB2BGR))
+                cv2.waitKey(1)
+
+        # 1. クロップ画像, 2. yの開始位置, 3. xの開始位置 を返す
+        return cropped_rgb, y1, x1
+
     def process_frame(
         self,
         frame_bgr: np.ndarray,
@@ -412,33 +436,55 @@ class PerceptionPipeline:
         t0 = time.time()
 
         # BGR → RGB
-        rgb = to_rgb(frame_bgr)
-        H, W = rgb.shape[:2]
+        rgb_before_clop  = to_rgb(frame_bgr)
+        H_before_crop, W_before_crop = rgb_before_clop.shape[:2]
 
-        # マスク生成が必要かどうか判定
+        # --- 1. クロップとオフセット取得 ---
+        # rgb: クロップ後画像, offset_y/x: 元画像での開始座標
+        rgb, offset_y, offset_x = self.cripping(rgb_before_clop, H_before_crop, W_before_crop)
+        cH, cW = rgb.shape[:2]  # クロップ後の高さ・幅
+
+        # マスク生成判定
         need_new_masks = (
             self.frame_count % self.maskgen_interval == 0
             or self.last["mask"] is None
         )
-        best_per_label = {}  # label -> dict
 
         if need_new_masks:
-            # --- SAM2 で「全マスク」を生成 ---
-            self.sam.set_image(rgb)  # ここが高コスト
+            self.sam.set_image(rgb)
             masks = self.sam.generate_masks(rgb)
-            print(f"DEBUG: SAM2 generated {len(masks)} raw masks.") # マスク候補の数
 
-            # --- 小さすぎる/大きすぎるマスクをフィルタ ---
+            # --- ここで「クロップ世界のマスク」を「元の世界のサイズ」に変換する ---
+            for m in masks:
+                # 1. BBoxの座標をオフセット分ずらす
+                m['bbox'][0] += offset_x
+                m['bbox'][1] += offset_y
+
+                # 2. マスク(240, W) を元の (480, W) に戻す
+                # 元の画像と同じサイズの「すべてFalse（黒）」の配列を作る
+                full_mask = np.zeros((H_before_crop, W_before_crop), dtype=bool)
+                # 指定した位置（クロップした範囲）にだけ、SAMの結果を貼り付ける
+                full_mask[offset_y : offset_y + rgb.shape[0], 
+                          offset_x : offset_x + rgb.shape[1]] = m['segmentation']
+                
+                # 上書きする
+                m['segmentation'] = full_mask
+
+            # この後、フィルタリングやCLIP処理を続行すれば、
+            # 全ての座標とサイズが H=480 の世界で統一されます。
+
+            # --- 4. フィルタリング (ここでの H, W はオリジナルサイズを渡す) ---
             masks = filter_masks_by_area(
                 masks,
-                H,
-                W,
+                H_before_crop, 
+                W_before_crop,
                 self.min_area,
                 self.max_area_frac,
             )
 
-            # --- マスクごとに crop & bbox を作成 ---
-            crops, bboxes = masks_to_crops_and_bboxes(rgb, masks)
+            # --- 5. CLIP用の Crop作成 ---
+            # ここでは「元画像(rgb_before_clop)」から「復元後のBBox」を使って切り抜く
+            crops, bboxes = masks_to_crops_and_bboxes(rgb_before_clop, masks)
             print(f"DEBUG: After area filter, {len(masks)} masks remain.")
             # =============================
             # DEBUG: Save all crops & CLIP scores
@@ -448,135 +494,53 @@ class PerceptionPipeline:
 
             print("\n--- DEBUG: CLIP crop & score list ---")
 
-        #     for i, crop in enumerate(crops):
-        #         # crop 保存
-        #         crop_path = os.path.join(debug_dir, f"crop_{i:02d}.png")
-        #         cv2.imwrite(crop_path, cv2.cvtColor(crop, cv2.COLOR_RGB2BGR))
-
-        #         # 全ラベルに対するスコアを計算
-        #         score_dict = self.clip.score_single(crop)
-
-        #         print(f"[Crop {i:02d}] {crop_path}")
-        #         for label, score in score_dict.items():
-        #             print(f"    {label:10s} : {score:.4f}")
-
-
-        #     if crops:
-        #         if target_label is None:
-        #             # 従来の方式：CLIPスコア最大採用
-        #             pick = self.clip.pick_best(crops)
-        #         else:
-        #             # ★ 新方式：LLM の next_food でフィルタした中で最大スコア
-        #             pick = self.clip.pick_target(crops, target_label)
-        #         if pick is not None:
-        #             idx = pick["index"]
-        #             cls = pick["cls"]
-        #             score = float(pick["score"])
-        #             bbox = bboxes[idx]
-
-        #             # bbox で SAM2 のマスクを再度 refine してもいいし、
-        #             # 既存の masks[idx] をそのまま使っても良い。
-        #             # ここでは refine して精度を上げる。
-        #             refined_mask = self.sam.predict_by_bbox(bbox)
-
-        #             # bbox 中心ピクセル
-        #             x1, y1, x2, y2 = bbox
-        #             cx = int((x1 + x2) / 2)
-        #             cy = int((y1 + y2) / 2)
-        #             center_px = (cx, cy)
-
-        #             # 深度が使える場合は中心の depth を m で取得
-        #             depth_m = None
-        #             if self.enable_depth and depth_frame is not None:
-        #                 if (
-        #                     depth_frame.shape[0] == H
-        #                     and depth_frame.shape[1] == W
-        #                 ):
-        #                     raw_depth = float(depth_frame[cy, cx])  # mm 想定
-        #                     if raw_depth > 0:
-        #                         depth_m = raw_depth / 1000.0  # m に変換
-        #                 # 解像度が合っていない場合は depth_m は None のまま
-
-        #             self.last.update(
-        #                 mask=refined_mask,
-        #                 bbox=bbox,
-        #                 label=cls,
-        #                 score=score,
-        #                 center_px=center_px,
-        #                 depth_m=depth_m,
-        #             )
-        #         else:
-        #             # CLIP で有力な候補が見つからなかった場合
-        #             self.last.update(
-        #                 mask=None,
-        #                 bbox=None,
-        #                 label=None,
-        #                 score=None,
-        #                 center_px=None,
-        #                 depth_m=None,
-        #             )
-        #     else:
-        #         # 有効マスクが1つもなかった場合
-        #         self.last.update(
-        #             mask=None,
-        #             bbox=None,
-        #             label=None,
-        #             score=None,
-        #             center_px=None,
-        #             depth_m=None,
-        #         )
-
-        # # FPS の計算（指数移動平均）
-        # self.frame_count += 1
-        # dt = max(time.time() - t0, 1e-6)
-        # fps = 1.0 / dt
-        # if self.ema_fps is None:
-        #     self.ema_fps = fps
-        # else:
-        #     self.ema_fps = 0.9 * self.ema_fps + 0.1 * fps
-
-        # # 出力をまとめて返す
-        # return {
-        #     "mask": self.last["mask"],
-        #     "bbox": self.last["bbox"],
-        #     "label": self.last["label"],
-        #     "score": self.last["score"],
-        #     "center_px": self.last["center_px"],
-        #     "depth_m": self.last["depth_m"],
-        #     "fps": self.ema_fps,
-        # }
                 # =============================
             # CLIP: labelごとに best crop を選ぶ
             # =============================
 
 
+            best_per_label = {}
             for i, crop in enumerate(crops):
                 score_dict = self.clip.score_single(crop)
                 if score_dict is None:
                     continue
-
+                
                 for label, score in score_dict.items():
-                    if (
-                        label not in best_per_label
-                        or score > best_per_label[label]["score"]
-                    ):
+                    if (label not in best_per_label or score > best_per_label[label]["score"]):
                         bbox = bboxes[i]
 
+                        # 中心座標の計算
                         x1, y1, x2, y2 = bbox
                         cx = int((x1 + x2) / 2)
                         cy = int((y1 + y2) / 2)
 
+                        # 距離の取得
                         depth_m = None
                         if self.enable_depth and depth_frame is not None:
-                            if depth_frame.shape[:2] == (H, W):
-                                d = float(depth_frame[cy, cx])
-                                if d > 0:
-                                    depth_m = d / 1000.0
+                            d = float(depth_frame[cy, cx])
+                            if d > 0:
+                                depth_m = d / 1000.0
 
-                        refined_mask = self.sam.predict_by_bbox(bbox)
+                        # --- 【修正】SAMによる再予測とサイズ復元 ---
+                        # 1. SAM用のローカル座標BBox
+                        bbox_for_sam = [
+                            bbox[0] - offset_x, 
+                            bbox[1] - offset_y, 
+                            bbox[2] - offset_x, 
+                            bbox[3] - offset_y
+                        ]
+                        
+                        # 2. クロップ画像に対して再予測
+                        refined_mask_small = self.sam.predict_by_bbox(bbox_for_sam)
 
+                        # 3. 元のサイズ (480x640) に戻すためのパディング処理
+                        refined_full_mask = np.zeros((H_before_crop, W_before_crop), dtype=bool)
+                        refined_full_mask[offset_y : offset_y + cH, 
+                                          offset_x : offset_x + cW] = refined_mask_small
+                        
+                        # 4. 辞書に格納 (修正したフルサイズマスクを入れる)
                         best_per_label[label] = {
-                            "mask": refined_mask,
+                            "mask": refined_full_mask, 
                             "bbox": bbox,
                             "center_px": (cx, cy),
                             "score": float(score),
@@ -584,11 +548,73 @@ class PerceptionPipeline:
                         }
 
 
-
         self.frame_count += 1
         dt = max(time.time() - t0, 1e-6)
         fps = 1.0 / dt
         self.ema_fps = fps if self.ema_fps is None else 0.9*self.ema_fps + 0.1*fps
+
+
+        # === 可視化コードの追加 (return の直前に挿入) ===
+
+       
+        args = sys.argv
+        if len(args) > 1:
+            # ループの前に、全候補を格納するリストを用意
+            all_candidates = []
+
+            for i, crop in enumerate(crops):
+                score_dict = self.clip.score_single(crop)
+                if score_dict is None:
+                    continue
+                
+                # そのクロップで最も高いスコアを持つラベルを取得
+                top_label = max(score_dict, key=score_dict.get)
+                top_score = score_dict[top_label]
+
+                # 情報を辞書にまとめてリストに追加
+                all_candidates.append({
+                    "crop": crop,
+                    "label": top_label,
+                    "score": float(top_score),
+                    "bbox": bboxes[i]
+                })
+            all_candidates.sort(key=lambda x: x["score"], reverse=True)
+            if all_candidates:
+                import matplotlib.pyplot as plt
+                import math
+
+                num_imgs = len(all_candidates)
+                cols = 5
+                rows = math.ceil(num_imgs / cols)
+
+                plt.figure(figsize=(cols * 3, rows * 3))
+                for i, cand in enumerate(all_candidates):
+                    plt.subplot(rows, cols, i + 1)
+                    plt.imshow(cand["crop"])
+                    plt.title(f"idx:{i} {cand['label']}\n({cand['score']:.2f})")
+                    plt.axis('off')
+                
+                plt.tight_layout()
+                plt.show()
+           
+        # ============================================
+        # === サイズ・座標の整合性チェックログ ===
+        print(f"\n--- Output Data Consistency Check ---")
+        print(f"Original Image Size : {H_before_crop}x{W_before_crop}")
+        print(f"Cropped ROI Size    : {cH}x{cW} (Offset: y={offset_y}, x={offset_x})")
+        
+        for label, inst in best_per_label.items():
+            mask_shape = inst["mask"].shape
+            bbox = inst["bbox"]
+            center = inst["center_px"]
+            print(f"[{label}]:")
+            print(f"  - Mask Shape  : {mask_shape}  {'[OK]' if mask_shape[:2] == (H_before_crop, W_before_crop) else '[ERROR: Size Mismatch]'}")
+            print(f"  - BBox        : {bbox}")
+            print(f"  - Center Pixel: {center}")
+            # Centerが画像範囲内かチェック
+            if not (0 <= center[0] < W_before_crop and 0 <= center[1] < H_before_crop):
+                print(f"  - [WARNING]: Center pixel is OUTSIDE the original image dimensions!")
+        print(f"--------------------------------------\n")
 
         # ★ 必ず Dict を返す
         return {

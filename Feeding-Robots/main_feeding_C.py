@@ -57,7 +57,7 @@ DEBUG_CROP_DIR = os.path.join(PROJECT_ROOT, "debug_crops")
 os.makedirs(DEBUG_CROP_DIR, exist_ok=True)
 
 # --- ランダム選択の実験用設定 ---
-RANDOM_SEED = 0          # 再現性が要るなら 0 など固定 / 毎回変えたいなら None
+RANDOM_SEED = None          # 再現性が要るなら 0 など固定 / 毎回変えたいなら None
 AVOID_IMMEDIATE_REPEAT = False   # 連続同一ラベルを避ける（候補が2つ以上あるときのみ）
 MIN_SCORE_TO_ACCEPT = None      # 例: 15.0 など。Noneならスコアで弾かず必ず候補から選ぶ
 
@@ -82,9 +82,9 @@ def load_calibration(path: str) -> Dict[str, Any]:
 
 
 def CheckIfNewPositionInWorkspace(x, y, z) -> bool:
-    if x > 500 or x < 200:
+    if x > 500 or x < 150:
         return False
-    if y < -200 or y > 300:
+    if y < -200 or y > 200:
         return False
     if z < 94 or z > 400:
         return False
@@ -96,7 +96,15 @@ def init_xarm(ip: str) -> XArmAPI:
     print(f"[xArm] 接続中... IP={ip}")
 
     arm.motion_enable(True)
-    arm.set_mode(0)
+    # sys.argv[0] はスクリプト名、[1] 以降が引数
+    if len(sys.argv) > 1:
+        arg = sys.argv[1]
+        print(f"受け取った引数: {arg}")
+        if arg == "debug":
+            arm.set_mode(2)
+        else: 
+            arm.set_mode(0) 
+
     arm.set_state(0)
     time.sleep(1.0)
 
@@ -120,6 +128,7 @@ def init_realsense() -> rs.pipeline:
 def build_manual_clip_prompts() -> Dict[str, Any]:
     return {
         "Strawberry Yogurt": [
+            "white"
             "a bowl of yogurt with strawberry jam",
             "creamy yogurt with red fruit jam",
             "white yogurt mixed with strawberry jam",
@@ -129,12 +138,13 @@ def build_manual_clip_prompts() -> Dict[str, Any]:
             "Japanese curry roux sauce",
             "brown curry gravy",
             "curry sauce without rice",
-            "a plate of curry source",
+            "brown curry source in the plastic container",
         ],
         "Cone": [
-            "sweet corn kernels (maize kernels)",
-            "a pile of shiny yellow corn kernels",
+            "sweet kernel corn in the plastic container",
+            "a pile of yellow corn kernels",
             "close-up yellow corn kernels",
+            "grainy one in the plastic container",
         ],
     }
 
@@ -414,7 +424,7 @@ def main():
         device="cuda",
         maskgen_interval=1,
         min_area=1000,
-        max_area_frac=0.15,
+        max_area_frac=0.05,
         clip_model="ViT-B/32",
         clip_prompts=clip_prompts,
         enable_depth=True,
@@ -423,7 +433,7 @@ def main():
     eat_history = []
 
     # ランダム生成器（再現性のため固定seed可）
-    rng = random.Random(RANDOM_SEED)
+    rng = random.Random()
 
     try:
         while True:

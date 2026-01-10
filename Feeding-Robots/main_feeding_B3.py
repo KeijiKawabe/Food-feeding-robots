@@ -173,7 +173,7 @@ def init_realsense() -> rs.pipeline:
 
 
 def CheckIfNewPositionInWorkspace(x, y, z):
-    if x > 500 or x < 250:
+    if x > 500 or x < 150:
         return False
     if y < -200 or y > 200:
         return False
@@ -185,6 +185,7 @@ def CheckIfNewPositionInWorkspace(x, y, z):
 def build_manual_clip_prompts() -> Dict[str, Any]:
     return {
         "Strawberry Yogurt": [
+            "white"
             "a bowl of yogurt with strawberry jam",
             "creamy yogurt with red fruit jam",
             "white yogurt mixed with strawberry jam",
@@ -194,12 +195,15 @@ def build_manual_clip_prompts() -> Dict[str, Any]:
             "Japanese curry roux sauce",
             "brown curry gravy",
             "curry sauce without rice",
-            "a plate of curry source"
+            "a plate of curry source",
+            "BROWN source",
+            "whatever brown in a box"
         ],
         "Cone": [
-            "a plate of yellow sweet corn kernels",
-            "a pile of glossy yellow corn kernels",
-            "yellow corn kernels on a plate",
+            "sweet corn kernels (maize kernels)",
+            "a pile of yellow corn kernels",
+            "close-up yellow corn kernels",
+            "yellow"
         ],
     }
 
@@ -572,7 +576,7 @@ Output STRICT JSON only:
 
     try:
         resp = client.responses.create(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             input=[{"role": "user", "content": prompt}],
             text={"format": {"type": "json_schema", "name": "choose_label_alternate", "strict": True, "schema": schema}},
         )
@@ -711,7 +715,7 @@ def main():
         device="cuda",
         maskgen_interval=1,
         min_area=1000,
-        max_area_frac=0.15,  # ← 背景がでかいマスクを落とす（必要なら更に下げる）
+        max_area_frac=0.05,  # ← 背景がでかいマスクを落とす（必要なら更に下げる）
         clip_model="ViT-B/32",
         clip_prompts=clip_prompts,
         enable_depth=True,

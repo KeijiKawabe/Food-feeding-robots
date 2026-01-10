@@ -1,0 +1,212 @@
+DEBUG [IRLogger.cpp:105] @ 0.0010967s :***************************************************
+DEBUG [IRLogger.cpp:106] @ 0.0013446s :* IRImagerDirect SDK                              *
+DEBUG [IRLogger.cpp:107] @ 0.0014629s :***************************************************
+DEBUG [IRLogger.cpp:113] @ 0.001532s :* Native Machine:      AMD64
+DEBUG [IRLogger.cpp:114] @ 0.001589s :* Machine:             AMD64
+DEBUG [IRLogger.cpp:116] @ 0.0018512s :* OS:                  Windows 10 0 26100
+DEBUG [IRLogger.cpp:123] @ 0.0019102s :***************************************************
+DEBUG [IRDeviceParams.cpp:204] @ 0.0190568s :Parameters
+DEBUG [IRDeviceParams.cpp:205] @ 0.0190952s :serial: 14110095
+DEBUG [IRDeviceParams.cpp:206] @ 0.0191087s :videoformatindex: 0
+DEBUG [IRDeviceParams.cpp:207] @ 0.0191208s :fov: 0
+DEBUG [IRDeviceParams.cpp:208] @ 0.019133s :optics_text: 0000000000000000
+DEBUG [IRDeviceParams.cpp:209] @ 0.019145s :formatspath: 0000022B713A2720
+DEBUG [IRDeviceParams.cpp:210] @ 0.0191582s :calipath: 0000022B7B65DD20
+DEBUG [IRDeviceParams.cpp:211] @ 0.0191694s :temperature min: 0
+DEBUG [IRDeviceParams.cpp:212] @ 0.0191805s :temperature max: 0
+DEBUG [IRDeviceParams.cpp:213] @ 0.0191934s :framerate: 32
+DEBUG [IRDeviceParams.cpp:214] @ 0.0192046s :bispectral: 0
+DEBUG [IRDeviceParams.cpp:215] @ 0.0192156s :flag automatic: 1
+DEBUG [IRDeviceParams.cpp:216] @ 0.0192272s :min interval: 15
+DEBUG [IRDeviceParams.cpp:217] @ 0.0192399s :max interval: 0
+DEBUG [IRDeviceParams.cpp:218] @ 0.0192513s :chip heating mode: 0
+DEBUG [IRDeviceParams.cpp:219] @ 0.0192635s :chip heating fixed val: 40
+DEBUG [IRDeviceParams.cpp:220] @ 0.0192757s :focus:  -1
+DEBUG [IRDeviceParams.cpp:221] @ 0.019289s :enable extended temp range: 0
+DEBUG [IRDeviceParams.cpp:222] @ 0.0193016s :buffer queue size: 5
+DEBUG [IRDeviceParams.cpp:223] @ 0.019313s :enable high precision: 0
+DEBUG [IRDeviceParams.cpp:224] @ 0.0193247s :radialDistortionCorrectionMode: 0
+DEBUG [IRDeviceParams.cpp:225] @ 0.019336s :deviceAPI: 0
+DEBUG [IRDeviceParams.cpp:226] @ 0.0193476s :useExternalProbeForReferencing: 0
+DEBUG [IRDeviceParams.cpp:227] @ 0.0193588s :enableMultiThreading: 0
+DEBUG [IRDeviceParams.cpp:232] @ 0.0193727s :ethernetDevice.deviceIpAddress: 0.0.0.0
+DEBUG [IRDeviceParams.cpp:233] @ 0.0193841s :ethernetDevice.localUdpPort: 0
+DEBUG [IRDeviceParams.cpp:234] @ 0.0193954s :ethernetDevice.checkUdpSenderIp: 1
+DEBUG [Cali.cpp:87] @ 0.532306s :Calibration directory path: .\Cali-14110095.xml
+DEBUG [Cali.cpp:88] @ 0.532343s :Calibration file name: Cali-14110095.xml
+DEBUG [Cali.cpp:98] @ 0.54541s :Calibration data A: 1450 B:400 C:4095 D:1000
+INFO [IRImager.cpp:266] @ 0.650751s :Init thermal imager to 14110095 with size: 160x121@120 Hz
+DEBUG [Cali.cpp:87] @ 0.651019s :Calibration directory path: .\Cali-14110095.xml
+DEBUG [Cali.cpp:88] @ 0.651029s :Calibration file name: Cali-14110095.xml
+DEBUG [Cali.cpp:98] @ 0.651281s :Calibration data A: 1450 B:400 C:4095 D:1000
+DEBUG [Cali.cpp:87] @ 0.651939s :Calibration directory path: .\Cali-14110095.xml
+DEBUG [Cali.cpp:88] @ 0.651954s :Calibration file name: Cali-14110095.xml
+DEBUG [Cali.cpp:98] @ 0.652149s :Calibration data A: 1450 B:400 C:4095 D:1000
+DEBUG [IRImager.cpp:300] @ 0.652193s :No temperature range configuration specified. Setting default values tMin: -20 , tMax: 100
+DEBUG [IRImager.cpp:377] @ 0.6601s :Using HID control interface
+DEBUG [IRImager.cpp:417] @ 0.682481s :Initialized HID control interface to device with HW:21 FW:2025
+DEBUG [IRImager.cpp:438] @ 0.682525s :Frameconfig - width(in): 160, height(in): 121, interval: 83333, max framerate: 120, HW interval: 0.00833333
+DEBUG [Cali.cpp:87] @ 0.682541s :Calibration directory path: .\Cali-14110095.xml
+DEBUG [Cali.cpp:88] @ 0.682549s :Calibration file name: Cali-14110095.xml
+DEBUG [Cali.cpp:98] @ 0.683005s :Calibration data A: 1450 B:400 C:4095 D:1000
+DEBUG [ImageProcessing.cpp:200] @ 0.707113s :Source buffer size: 38720 Width: 160 Height: 121
+DEBUG [ImageProcessing.cpp:121] @ 0.764944s :Source buffer size: 38720 Width: 160 Height: 121
+DEBUG [OpSource.cpp:376] @ 0.76586s :Using formats path: C:\Program Files (x86)\Optris GmbH\IrDirectSDK\examples\matlab\Formats.def
+DEBUG [OpSource.cpp:628] @ 0.766366s :Format found with size: 160
+DEBUG [OpSource.cpp:791] @ 0.766483s :Selected Format:"PI160 160x120 @ 120Hz"
+DEBUG [IRImager.cpp:844] @ 0.766854s :Caught onFrameInit with size: 160x120
+DEBUG [OpSource.cpp:376] @ 0.767774s :Using formats path: C:\Program Files (x86)\Optris GmbH\IrDirectSDK\examples\matlab\Formats.def
+DEBUG [OpSource.cpp:628] @ 0.768139s :Format found with size: 160
+DEBUG [OpSource.cpp:376] @ 0.768655s :Using formats path: C:\Program Files (x86)\Optris GmbH\IrDirectSDK\examples\matlab\Formats.def
+DEBUG [OpCorr.cpp:467] @ 0.774155s :Read cali: .\Cali-14110095.xml\Cali-14110095-48-M20-100.dat
+DEBUG [OpCorr.cpp:557] @ 0.774484s :Read calibration of camera no 14110095, # of fields: 6 , start of fields: 40
+DEBUG [ImageProcessing.cpp:1108] @ 1.06284s :Update flag temperature: 26.1328
+DEBUG [ImageProcessing.cpp:1111] @ 1.07134s :Update box temperature: 24.6875
+DEBUG [Cali.cpp:639] @ 1.07144s :Calibration file path: 0000022B7E0002F4/0000006634DEC7D8.xml
+DEBUG [SimpleXML.cpp:238] @ 1.0719s :Failed to open file .\Cali-14110095.xml\CaliExt-14110095.xml
+DEBUG [IRImager.cpp:550] @ 1.09514s :Chip heating disabled
+DEBUG [IRImager.cpp:1110] @ 1.21323s :Start flag calibration
+DEBUG [OpFlag.cpp:591] @ 11.8835s :SkimDiff: -11 Adjust: -1067 State: 1 EMax: 7941 Emin: 2337
+DEBUG [ImageProcessing.cpp:526] @ 11.895s :Skim_Adjust 4015
+DEBUG [IRImager.cpp:1124] @ 12.0126s :Finished startup calibration
+DEBUG [IRImager.cpp:1175] @ 26.7327s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 26.8936s :SkimDiff: -6 Adjust: -554 State: 1 EMax: 8486 Emin: 2850
+DEBUG [ImageProcessing.cpp:526] @ 26.9062s :Skim_Adjust 4014
+DEBUG [IRImager.cpp:1175] @ 41.7398s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 41.8999s :SkimDiff: -6 Adjust: -523 State: 1 EMax: 8533 Emin: 2881
+DEBUG [ImageProcessing.cpp:526] @ 41.9111s :Skim_Adjust 4013
+DEBUG [IRImager.cpp:1175] @ 56.7481s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 56.9081s :SkimDiff: -5 Adjust: -479 State: 1 EMax: 8588 Emin: 2925
+DEBUG [ImageProcessing.cpp:526] @ 56.92s :Skim_Adjust 4012
+DEBUG [IRImager.cpp:1175] @ 72.1242s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 72.3012s :SkimDiff: -5 Adjust: -434 State: 1 EMax: 8639 Emin: 2970
+DEBUG [ImageProcessing.cpp:526] @ 72.3132s :Skim_Adjust 4011
+DEBUG [IRImager.cpp:1175] @ 95.0041s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 95.181s :SkimDiff: -4 Adjust: -386 State: 1 EMax: 8700 Emin: 3018
+DEBUG [ImageProcessing.cpp:526] @ 95.193s :Skim_Adjust 4010
+DEBUG [IRImager.cpp:1175] @ 110.028s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 110.187s :SkimDiff: -4 Adjust: -333 State: 1 EMax: 8756 Emin: 3071
+DEBUG [ImageProcessing.cpp:526] @ 110.198s :Skim_Adjust 4009
+DEBUG [IRImager.cpp:1175] @ 126.859s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 127.019s :SkimDiff: -3 Adjust: -282 State: 1 EMax: 8819 Emin: 3122
+DEBUG [ImageProcessing.cpp:526] @ 127.032s :Skim_Adjust 4008
+DEBUG [IRImager.cpp:1175] @ 143.068s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 143.245s :SkimDiff: -3 Adjust: -227 State: 1 EMax: 8874 Emin: 3177
+DEBUG [ImageProcessing.cpp:526] @ 143.257s :Skim_Adjust 4007
+DEBUG [IRImager.cpp:1175] @ 158.092s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 158.253s :SkimDiff: -2 Adjust: -181 State: 1 EMax: 8945 Emin: 3223
+DEBUG [ImageProcessing.cpp:526] @ 158.266s :Skim_Adjust 4006
+DEBUG [IRImager.cpp:1175] @ 175.403s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 175.581s :SkimDiff: -2 Adjust: -121 State: 1 EMax: 8994 Emin: 3283
+DEBUG [ImageProcessing.cpp:526] @ 175.593s :Skim_Adjust 4005
+DEBUG [IRImager.cpp:1175] @ 194.764s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 194.941s :SkimDiff: -1 Adjust: -69 State: 1 EMax: 9050 Emin: 3335
+DEBUG [ImageProcessing.cpp:526] @ 194.953s :Skim_Adjust 4004
+DEBUG [IRImager.cpp:1175] @ 209.788s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 209.948s :SkimDiff: -1 Adjust: -18 State: 1 EMax: 9116 Emin: 3386
+DEBUG [ImageProcessing.cpp:526] @ 209.96s :Skim_Adjust 4003
+DEBUG [IRImager.cpp:1175] @ 224.797s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 224.957s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9169 Emin: 3439
+DEBUG [IRImager.cpp:1175] @ 242.188s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 242.364s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9179 Emin: 3443
+DEBUG [IRImager.cpp:1175] @ 257.211s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 257.372s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9189 Emin: 3443
+DEBUG [IRImager.cpp:1175] @ 272.235s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 272.397s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9197 Emin: 3450
+DEBUG [IRImager.cpp:1175] @ 298.059s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 298.22s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9214 Emin: 3453
+DEBUG [IRImager.cpp:1175] @ 325.035s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 325.196s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9223 Emin: 3458
+DEBUG [IRImager.cpp:1175] @ 353.356s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 353.531s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9241 Emin: 3460
+DEBUG [IRImager.cpp:1175] @ 369.644s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 369.819s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9247 Emin: 3467
+DEBUG [IRImager.cpp:1175] @ 393.419s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 393.579s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9253 Emin: 3472
+DEBUG [IRImager.cpp:1175] @ 414.075s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 414.236s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9267 Emin: 3473
+DEBUG [IRImager.cpp:1175] @ 442.202s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 442.379s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9278 Emin: 3485
+DEBUG [IRImager.cpp:1175] @ 457.418s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 457.578s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9284 Emin: 3484
+DEBUG [IRImager.cpp:1175] @ 481.178s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 481.338s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9301 Emin: 3482
+DEBUG [IRImager.cpp:1175] @ 519.465s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 519.625s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9312 Emin: 3490
+DEBUG [IRImager.cpp:1175] @ 545.897s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 546.057s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9330 Emin: 3495
+DEBUG [IRImager.cpp:1175] @ 581.211s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 581.386s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9340 Emin: 3504
+DEBUG [IRImager.cpp:1175] @ 607.722s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 607.883s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9355 Emin: 3508
+DEBUG [IRImager.cpp:1175] @ 643.129s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 643.29s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9364 Emin: 3515
+DEBUG [IRImager.cpp:1175] @ 670.346s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 670.522s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9373 Emin: 3524
+DEBUG [IRImager.cpp:1175] @ 710.667s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 710.843s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9382 Emin: 3529
+DEBUG [IRImager.cpp:1175] @ 735.321s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 735.499s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9395 Emin: 3529
+DEBUG [IRImager.cpp:1175] @ 755.929s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 756.09s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9399 Emin: 3534
+DEBUG [IRImager.cpp:1175] @ 782.954s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 783.131s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9417 Emin: 3537
+DEBUG [IRImager.cpp:1175] @ 812.921s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 813.082s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9422 Emin: 3540
+DEBUG [IRImager.cpp:1175] @ 846.506s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 846.666s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9431 Emin: 3550
+DEBUG [IRImager.cpp:1175] @ 890.841s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 891.018s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9446 Emin: 3553
+DEBUG [IRImager.cpp:1175] @ 925.88s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 926.057s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9454 Emin: 3559
+DEBUG [IRImager.cpp:1175] @ 965.32s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 965.481s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9460 Emin: 3566
+DEBUG [IRImager.cpp:1175] @ 990.344s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 990.505s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9471 Emin: 3563
+DEBUG [IRImager.cpp:1175] @ 1035.24s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 1035.4s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9485 Emin: 3569
+DEBUG [IRImager.cpp:1175] @ 1077.74s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 1077.91s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9491 Emin: 3579
+DEBUG [IRImager.cpp:1175] @ 1132.1s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 1132.26s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9503 Emin: 3586
+DEBUG [IRImager.cpp:1175] @ 1155.13s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 1155.3s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9514 Emin: 3585
+DEBUG [IRImager.cpp:1175] @ 1174.42s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 1174.58s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9523 Emin: 3589
+DEBUG [IRImager.cpp:1175] @ 1221.5s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 1221.67s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9527 Emin: 3595
+DEBUG [IRImager.cpp:1175] @ 1259.81s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 1259.99s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9537 Emin: 3600
+DEBUG [IRImager.cpp:1175] @ 1321.09s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 1321.26s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9551 Emin: 3602
+DEBUG [IRImager.cpp:1175] @ 1367.78s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 1367.96s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9553 Emin: 3608
+DEBUG [IRImager.cpp:1175] @ 1449.06s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 1449.24s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9574 Emin: 3613
+DEBUG [IRImager.cpp:1175] @ 1487.96s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 1488.13s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9581 Emin: 3621
+DEBUG [IRImager.cpp:1175] @ 1541.77s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 1541.94s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9587 Emin: 3622
+DEBUG [IRImager.cpp:1175] @ 1628.71s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 1628.87s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9602 Emin: 3627
+DEBUG [IRImager.cpp:1175] @ 1691.45s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 1691.6s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9610 Emin: 3628
+DEBUG [IRImager.cpp:1175] @ 1793.85s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 1794.02s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9620 Emin: 3639
+DEBUG [IRImager.cpp:1175] @ 1862.41s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 1862.58s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9636 Emin: 3646
+ERROR [OpMetadata.cpp:85] @ 2179.41s :Drop frame due possible data corruption: 34388 0.179688 0.210938 0.198853
+DEBUG [IRImager.cpp:1175] @ 2179.42s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 2179.59s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9676 Emin: 3671
+DEBUG [IRImager.cpp:1175] @ 2241.49s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 2241.67s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9680 Emin: 3671
+DEBUG [IRImager.cpp:1175] @ 2296.39s :Automatic control of shutter flag
+DEBUG [OpFlag.cpp:591] @ 2296.55s :SkimDiff: 0 Adjust: 0 State: 0 EMax: 9684 Emin: 3670
+DEBUG [IRImager.cpp:665] @ 2439.29s :Release imager
+DEBUG [BaseControlDevice.cpp:26] @ 2439.34s :Base destructor called
+DEBUG [IRImager.cpp:672] @ 2439.34s :Delete image processing
+DEBUG [IRImager.cpp:679] @ 2439.35s :Delete buffer
+DEBUG [IRImager.cpp:687] @ 2439.35s :Delete source buffer
+DEBUG [IRImager.cpp:694] @ 2439.35s :Delete buffer (energy)
+DEBUG [IRImager.cpp:701] @ 2439.35s :Delete timer
+DEBUG [IRImager.cpp:707] @ 2439.35s :Delete manual timer

@@ -178,7 +178,7 @@ def init_realsense() -> rs.pipeline:
 
 
 def CheckIfNewPositionInWorkspace(x, y, z):
-    if x > 500 or x < 250:
+    if x > 500 or x < 150:
         return False
     if y < -200 or y > 200:
         return False
@@ -190,6 +190,7 @@ def CheckIfNewPositionInWorkspace(x, y, z):
 def build_manual_clip_prompts() -> Dict[str, Any]:
     return {
         "Strawberry Yogurt": [
+            "white"
             "a bowl of yogurt with strawberry jam",
             "creamy yogurt with red fruit jam",
             "white yogurt mixed with strawberry jam",
@@ -200,14 +201,16 @@ def build_manual_clip_prompts() -> Dict[str, Any]:
             "brown curry gravy",
             "curry sauce without rice",
             "a plate of curry source",
+            "partially brown",
+            "whatever brown in a box"
         ],
         "Cone": [
-            "a plate of yellow sweet corn kernels",
-            "a pile of glossy yellow corn kernels",
-            "a yellow corn grains, isolated on white plate",
+            "sweet corn kernels (maize kernels)",
+            "a pile of yellow corn kernels",
+            "close-up yellow corn kernels",
+            "partially yellow"
         ],
     }
-
 
 def hard_thermal_safety_check(
     rec: Dict[str, Any],
@@ -585,7 +588,7 @@ Output STRICT JSON only:
 
     try:
         resp = client.responses.create(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             input=[{"role": "user", "content": prompt}],
             text={"format": {"type": "json_schema", "name": "choose_label_grouped", "strict": True, "schema": schema}},
         )
@@ -738,7 +741,7 @@ def main():
         device="cuda",
         maskgen_interval=1,
         min_area=1000,
-        max_area_frac=0.15,
+        max_area_frac=0.05,
         clip_model="ViT-B/32",
         clip_prompts=clip_prompts,
         enable_depth=True,
